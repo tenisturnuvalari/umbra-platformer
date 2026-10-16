@@ -62,22 +62,35 @@ src/game/world.js       OYUN MANTIĞI — render kütüphanesi import etmez
 src/core/physics.js     AABB süpürme fizigi (alt adımlı, tünellemeye karşı)
 src/core/audio.js       Prosedürel ses (WebAudio, sıfır ses dosyası)
 src/core/input.js       Klavye + kenar (edge) algılama
-src/render/scene.js     Three.js sahnesi: ışık, gölge haritası, sis, yağmur, bloom
+src/render/scene.js     Three.js sahnesi: ışık, gölge haritası, sis, yağmur, DOF, bloom
+src/render/terrain.js   Katmanlı ortam: dağ silüetleri, zemin perdesi, kadraj kütleleri
 src/render/character.js Prosedürel 3D iskelet + animasyon + avcı figürü
 src/levels/index.js     Aşama verisi (harita + ambiyans)
-test/smoke.mjs          Kafaüstü duman testi (Node, render yok)
+test/smoke.mjs          Kafaüstü duman testi (Node, render yok — 20 doğrulama)
+test/three-stub.mjs     "three" stub'ı: geometri mantığını Node'da test etmek için
 ```
 
 ### Görsel katman
 
-- **Three.js r170**, perspektif kamera, hafif açılı bakış (derinlik hissi)
-- **Gerçek gölge haritası**: yön ışığı (2048², PCF yumuşak) + oyuncunun feneri (SpotLight, 1024²)
-- **FogExp2** +16 adet kayan sis kartı → hacimsel derinlik
-- **Yağmur**: `LineSegments` ile prosedürel çizgi parçacıkları, rüzgar sapması, kamerayı takip eden hacim
-- **Şimşek** (Aşama III): yön ışığı parlaması + gecikmeli gürültü patlaması
-- **Bloom** (UnrealBloomPass) — kurulamazsa sessizce düz render'a düşer
-- Bloklar `InstancedMesh` (sahne başına tek çizim çağrısı), üst kenarlarda ışık çizgisi
-- ACES tone mapping, sinematik letterbox, film grain, vinyet
+**Derinlik, doku değil katmanla kurulur** (Limbo'nun asıl sırrı budur):
+
+- **Three.js r170**, perspektif kamera; mesafe FOV'dan türetilir → ekranda tam
+  `görüş × görüş` dünya birimi görünür, oyunun px değerleri ekranda birebir okunur
+- **5 katmanlı atmosferik perspektif**: uzak sırt silüetleri uzağa doğru gökyüzüne
+  solar (`buildRidge`), her katman kendi paralaks hızıyla kayar
+- **Organik zemin perdesi** (`buildTerrainCurtain`): kutu ızgarasının üstünü örten,
+  gürültüyle oluşmuş eğri üst kenar. Çarpışma ızgarada kalır; perde yalnızca görsel
+  olduğu için ayaklar zemine hafifçe gömülür. Çukur/diken sütunlarında perde inmez.
+- **Kadrajı kapatan yakın kütleler** (`buildForeground`): kameraya yakın, DOF ile
+  bulanıklaşan karanlık kayalar → Limbo'daki çerçeveleme hissi
+- **Derinlik alanı (BokehPass)**: odak oyuncuda takip edilir; uçlar bulanık, oyun
+  düzlemi keskin. Kurulamazsa atlanır
+- **Gerçek gölge haritası**: yön ışığı (2048², PCF yumuşak) + oyuncunun feneri (1024²)
+- **FogExp2** +16 adet kayan sis kartı, **yağmur** `LineSegments` ile prosedürel
+- **Şimşek** (Aşama III): ışık parlaması + gecikmeli gürültü
+- **Bloom** (UnrealBloomPass), ACES tone mapping, letterbox, film grain, vinyet
+- Bloklar `InstancedMesh`; kalıcı zemin neredeyse saf siyah, faz platformlarının
+  kenarları renkli ışık çizgisi (okunmaları gerekir)
 
 ### Ses
 
@@ -93,7 +106,8 @@ npm test        # node test/smoke.mjs
 
 Doğrulananlar: harita bütünlüğü, doğuş/çıkış güvenliği, zemin boşluklarının geçilebilirliği,
 zıplama/koşu değerleri, ölüm + yeniden doğuş, kontrol noktaları, faz güvenliği, ışık zemininde
-düşme, avcının yakalaması, aşama I merdiven geometrisi, faz köprüsünün boşluğu örtmesi.
+düşme, avcının yakalaması, aşama I merdiven geometrisi, faz köprüsünün boşluğu örtmesi,
+**zemin perdesi geometrisi** (NaN/indeks/diken görünürlüğü) ve gürültü determinizmi.
 
 **Test etmeyenler:** render/görsel kompozisyon, ses karışımı, FPS. Bunlar tarayıcıda sende.
 

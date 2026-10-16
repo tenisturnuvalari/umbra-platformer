@@ -6,7 +6,7 @@
   "description": "UMBRA — faz mekanikli, sisli ve yağmurlu 2.5D gölge platformer (Three.js).",
   "license": "MIT",
   "scripts": {
-    "test": "node test/smoke.mjs",
+    "test": "node --import ./test/register.mjs ./test/smoke.mjs",
     "start": "npx --yes serve@14 ."
   }
 }

@@ -32,6 +32,9 @@ try {
 const input = new Input();
 const audio = new GameAudio();
 
+// bloom + derinlik alanı; başarısız olursa sahne düz render ile çalışır
+await scene.enablePost(STAGES[0].ambience.bloom);
+
 let index = 0;
 let world = null;
 let started = false;

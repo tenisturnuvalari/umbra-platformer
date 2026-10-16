@@ -8,6 +8,7 @@
 
 import * as THREE from "three";
 import { Character, Creature } from "./character.js";
+import { buildTerrainCurtain, buildRidge, buildForeground } from "./terrain.js";
 
 export const TILE = 40;
 const DEPTH = 150;
@@ -73,14 +74,18 @@ export class StageScene {
 
     this.composer = null;
     this.bloomPass = null;
+    this.bokehPass = null;
     this.shake = 0;
     this.bolt = 0;
     this.boltIn = 3;
     this.disposables = [];
   }
 
-  /** Bloom varsa kurar, yoksa sessizce düz render'a döner. */
-  async enableBloom(strength) {
+  /**
+   * Bloom + derinlik alanını (DOF) kurar.
+   * Herhangi biri kurulamazsa sessizce eksik devam eder; düz render'a düşer.
+   */
+  async enablePost(strength, dof = true) {
     try {
       const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
         import("three/addons/postprocessing/EffectComposer.js"),
@@ -88,8 +93,26 @@ export class StageScene {
         import("three/addons/postprocessing/UnrealBloomPass.js"),
         import("three/addons/postprocessing/OutputPass.js"),
       ]);
+
       this.composer = new EffectComposer(this.renderer);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+      // derinlik alanı: odak oyuncuda, uzağın ve yakın kadrajın bulanıklaşması
+      if (dof) {
+        try {
+          const { BokehPass } = await import("three/addons/postprocessing/BokehPass.js");
+          this.bokehPass = new BokehPass(this.scene, this.camera, {
+            focus: 1000,           // oyuncunun kameraya uzaklığı sync() içinde güncellenir
+            aperture: 0.00002,      // yalnız uç noktalar bulanıklaşsın (zemin keskin kalır)
+            maxblur: 0.011,
+          });
+          this.composer.addPass(this.bokehPass);
+        } catch (err) {
+          console.warn("[umbra] DOF kurulamadı, devam", err);
+          this.bokehPass = null;
+        }
+      }
+
       this.bloomPass = new UnrealBloomPass(
         new THREE.Vector2(this.width, this.height), strength, 0.72, 0.55,
       );
@@ -97,8 +120,9 @@ export class StageScene {
       this.composer.addPass(new OutputPass());
       this.resize();
     } catch (err) {
-      console.warn("[umbra] bloom kurulamadı, düz render ile devam", err);
+      console.warn("[umbra] post-process zinciri kurulamadı, düz render ile devam", err);
       this.composer = null;
+      this.bokehPass = null;
     }
   }
 
@@ -120,6 +144,7 @@ export class StageScene {
     this.disposeObjects();
 
     const amb = world.def.ambience;
+    const stage = world.stage;
     this.ambience = amb;
 
     this.scene.fog = new THREE.FogExp2(amb.fog, amb.fogDensity);
@@ -134,19 +159,22 @@ export class StageScene {
     this.scene.add(this.backdrop);
     this._track(this.backdrop);
 
-    this.ruins = new THREE.Group();
-    const ruinMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(amb.fog).multiplyScalar(1.25) });
-    let seed = 91 + world.stage.cols;
-    const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
-    for (let i = 0; i < 16; i++) {
-      const hgt = 160 + rnd() * 620;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(70 + rnd() * 190, hgt, 60), ruinMat);
-      m.position.set(rnd() * 4200 - 400, -world.stage.pxH * 0.2 + hgt / 2 - rnd() * 300, -520 - rnd() * 380);
-      this.ruins.add(m);
-      this._track(m.geometry);
+    // --- uzak sırt silüetleri: uzağa doğru gökyüzüne solan katmanlar
+    this.ridges = new THREE.Group();
+    const ridgeLayers = [
+      { z: -1550, amp: 640, baseY: -stage.pxH * 0.04, depth01: 0.02, seed: 41, span: 9200, k: 0.86 },
+      { z: -1180, amp: 500, baseY: -stage.pxH * 0.10, depth01: 0.24, seed: 77, span: 7600, k: 0.72 },
+      { z: -840, amp: 370, baseY: -stage.pxH * 0.15, depth01: 0.46, seed: 129, span: 6300, k: 0.54 },
+      { z: -560, amp: 255, baseY: -stage.pxH * 0.19, depth01: 0.70, seed: 211, span: 5200, k: 0.34 },
+      { z: -330, amp: 165, baseY: -stage.pxH * 0.22, depth01: 0.92, seed: 307, span: 4300, k: 0.14 },
+    ];
+    for (const L of ridgeLayers) {
+      const ridge = buildRidge({ ...L, sky: amb.skyTop, fog: amb.fog, segments: 300 });
+      ridge.userData.k = L.k;
+      this.ridges.add(ridge);
+      this._track(ridge.geometry, ridge.material);
     }
-    this.scene.add(this.ruins);
-    this._track(ruinMat);
+    this.scene.add(this.ridges);
 
     // --- ışıklar
     const hemi = new THREE.HemisphereLight(amb.skyTop, 0x05070a, 0.55);
@@ -177,7 +205,6 @@ export class StageScene {
     this.spot = spot;
 
     // --- bloklar (instance edilmiş)
-    const stage = world.stage;
     const tileGeo = new THREE.BoxGeometry(TILE, TILE, DEPTH);
     const edgeGeo = new THREE.BoxGeometry(TILE, 3.4, DEPTH * 0.42);
     this._track(tileGeo, edgeGeo);
@@ -188,9 +215,11 @@ export class StageScene {
 
     this.blockGroups = {};
     const defs = {
-      solid: { fill: mkMat(0x0b0e13, 0x000000, 0), rim: new THREE.MeshBasicMaterial({ color: amb.rim, transparent: true, opacity: 0.85 }) },
-      light: { fill: mkMat(0x1b1510, 0xff9a45, 0.55), rim: new THREE.MeshBasicMaterial({ color: amb.glowLight, transparent: true, opacity: 0.95 }) },
-      shadow: { fill: mkMat(0x0a1420, 0x3fc9ff, 0.5), rim: new THREE.MeshBasicMaterial({ color: amb.glowShadow, transparent: true, opacity: 0.95 }) },
+      // kalıcı zemin: neredeyse saf siyah (referanstaki Limbo silüeti gibi)
+      solid: { fill: mkMat(0x04060a, 0x000000, 0), rim: new THREE.MeshBasicMaterial({ color: amb.rim, transparent: true, opacity: 0.3 }) },
+      // faz platformları: okunmaları gerekir → kenar ışığı güçlü kalır
+      light: { fill: mkMat(0x171209, 0xff9a45, 0.5), rim: new THREE.MeshBasicMaterial({ color: amb.glowLight, transparent: true, opacity: 0.95 }) },
+      shadow: { fill: mkMat(0x08111c, 0x3fc9ff, 0.45), rim: new THREE.MeshBasicMaterial({ color: amb.glowShadow, transparent: true, opacity: 0.95 }) },
     };
     this._track(defs.solid.fill, defs.solid.rim, defs.light.fill, defs.light.rim, defs.shadow.fill, defs.shadow.rim);
 
@@ -225,6 +254,26 @@ export class StageScene {
       this.scene.add(meshes);
       this.blockGroups[key] = { meshes, fill: defs[key].fill, rim: defs[key].rim, active: 1 };
     }
+
+    // --- organik zemin silüeti: kutu ızgarasının üstünü örten perde.
+    //     Çarpışma hâlâ ızgaradadır; bu yalnızca görsel katmandır.
+    const curtain = buildTerrainCurtain(stage, {
+      seed: 17 + stage.cols * 3, amp: 15, color: amb.ground ?? 0x04060a,
+    });
+    curtain.position.z = DEPTH / 2 + 3;
+    curtain.receiveShadow = true;
+    curtain.renderOrder = 1;
+    this.scene.add(curtain);
+    this.curtain = curtain;
+    this._track(curtain.geometry, curtain.material);
+
+    // --- yakın kadraj kütleleri (DOF ile bulanıklaşacak, çerçeveyi kapatan karanlık)
+    this.foreground = buildForeground({
+      count: 4, span: stage.pxW + 3000, stageH: stage.pxH, seed: 23 + stage.cols,
+    });
+    this.foreground.userData.k = -0.26;     // negatif = dünyadan hızlı hareket (yakın hissi)
+    this.scene.add(this.foreground);
+    this._track(this.foreground.userData.geometry, this.foreground.userData.material);
 
     // --- dikenler
     const spikeTiles = stage.hazards.filter((h, i, a) =>
@@ -357,7 +406,10 @@ export class StageScene {
         }
       });
     };
-    kill(this.backdrop); kill(this.ruins); kill(this.fogCards); kill(this.rain); kill(this.exitGroup);
+    kill(this.backdrop); kill(this.ridges); kill(this.curtain); kill(this.foreground);
+    kill(this.fogCards); kill(this.rain); kill(this.exitGroup);
+    this.ridges = null; this.curtain = null; this.foreground = null;
+    this.exitGroup = null; this.fogCards = null; this.rain = null; this.backdrop = null;
     if (this.blockGroups) for (const k of Object.keys(this.blockGroups)) kill(this.blockGroups[k]?.meshes);
     if (this.moon) { this.scene.remove(this.moon.target); kill(this.moon); this.moon = null; }
     if (this.spot) { this.scene.remove(this.spot.target); kill(this.spot); this.spot = null; }
@@ -373,7 +425,14 @@ export class StageScene {
     const p = world.player;
 
     // --- kamera
-    const zoom = THREE.MathUtils.clamp(this.width / 1280, 0.78, 1.7);
+    // Mesafe, FOV'dan türetilir: ekranda tam olarak view.w × view.h dünya
+    // birimi görünür. Böylece TUNE değerleri (px) ekranda birebir okunur ve
+    // world.js'in kenar kırpma matematiği gerçek görüş alanıyla örtüşür.
+    const t20 = Math.tan((this.camera.fov * Math.PI) / 360);
+    const dist = Math.max(
+      (world.view.h / 2) / t20,
+      (world.view.w / 2) / (t20 * this.camera.aspect),
+    );
     const cx = world.cam.x + world.view.w / 2;
     const cy = -(world.cam.y + world.view.h / 2);
 
@@ -381,7 +440,7 @@ export class StageScene {
     const sx = (Math.random() - 0.5) * this.shake;
     const sy = (Math.random() - 0.5) * this.shake;
 
-    this.camera.position.set(cx - 74, cy + 92, 720 * zoom);
+    this.camera.position.set(cx - 74, cy + 92, dist * 1.03);
     this.camera.lookAt(cx + 26, cy - 12, 0);
     this.camera.position.x += sx;
     this.camera.position.y += sy;
@@ -455,11 +514,34 @@ export class StageScene {
       }
     }
 
-    // --- arka plan paralaks
-    this.backdrop.position.x = cx * 0.18;
-    this.backdrop.position.y = cy * 0.12;
-    this.ruins.position.x = cx * 0.45;
-    this.ruins.position.y = cy * 0.3;
+    // --- atmosferik paralaks: her katman kendi hızında kayar
+    //     ekran hızı = (1 - k): k küçük → yakın (hızlı), k büyük → uzak (yavaş)
+    this.backdrop.position.x = cx * 0.06;
+    this.backdrop.position.y = cy * 0.05;
+
+    if (this.ridges) {
+      for (const r of this.ridges.children) {
+        const k = r.userData.k;
+        r.position.x = cx * k;
+        r.position.y = cy * k;
+      }
+    }
+
+    if (this.foreground) {
+      const k = this.foreground.userData.k;      // -0.26 → dünyadan hızlı
+      this.foreground.position.x = cx * k;
+      this.foreground.position.y = cy * k * 0.55;
+    }
+
+    // --- derinlik alanı: odak her zaman oyuncuda
+    if (this.bokehPass) {
+      const d = Math.hypot(
+        this.camera.position.x - (p.x + p.w / 2),
+        this.camera.position.y - (-(p.y + p.h / 2)),
+        this.camera.position.z,
+      );
+      this.bokehPass.uniforms.focus.value += (d - this.bokehPass.uniforms.focus.value) * (1 - Math.exp(-6 * dt));
+    }
 
     // --- yağmur
     if (this.rain) {

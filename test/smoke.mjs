@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { STAGES } from "../src/levels/index.js";
 import { createWorld, updateWorld, TILE } from "../src/game/world.js";
 import { overlaps } from "../src/core/physics.js";
+import { buildTerrainCurtain, makeNoise, fbm } from "../src/render/terrain.js";
 
 /* ------------------------------------------------------------------ yardımcı */
 
@@ -297,6 +298,89 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
     assert.ok(bridging.length > 0, `${phase} fazında boşluğu köprüleyen platform yok`);
   }
   pass("Boşluk her iki fazda da köprülenebilir (bulmaca gerçekten çözülebilir)");
+}
+
+/* --------------------------------- 12) zemin perdesi (görsel katman) geometrisi */
+
+{
+  const AMP = 15;
+  const SUB = 5;
+
+  /** Beklenen perde yüzeyi satırı: en alttan yukarıya bitişik '#' kütleşi. */
+  const expectedTopRow = (s, x) => {
+    let y = s.rows - 1;
+    if (s.grid[y][x] !== "#") return -1;
+    while (y > 0 && s.grid[y - 1][x] === "#") y--;
+    return y;
+  };
+
+  let maxRise = 0;
+
+  for (const stage of STAGES) {
+    const s = createWorld(stage).stage;
+    const mesh = buildTerrainCurtain(s, { seed: 17 + s.cols * 3, amp: AMP });
+    const pos = mesh.geometry.attributes.position.array;
+    const idx = mesh.geometry.index;
+
+    // 1) sayılar sağlam (NaN = gözle görünmez/çökmüş zemin)
+    for (let i = 0; i < pos.length; i++) {
+      assert.ok(Number.isFinite(pos[i]), `${stage.name}: perdede NaN var (i=${i})`);
+    }
+    const vCount = pos.length / 3;
+    assert.equal(vCount, (s.cols * SUB + 1) * 2, `${stage.name}: beklenmeyen vertex sayısı`);
+
+    // 2) indeksler sınırlar içinde (taşma = bozuk üçgenler)
+    for (const i of idx) {
+      assert.ok(i >= 0 && i < vCount, `${stage.name}: indeks taşması ${i} >= ${vCount}`);
+    }
+
+    // 3) sütun kuralı + yükseklik bandı
+    for (let x = 0; x < s.cols; x++) {
+      const row = expectedTopRow(s, x);
+
+      if (row < 0) {
+        // çukur / diken / faz zemini: perde inmemeli
+        for (let k = 0; k < SUB; k++) {
+          const surface = -pos[(x * SUB + k) * 6 + 1];
+          assert.ok(
+            surface >= s.pxH + 500,
+            `${stage.name}: sütun ${x} yüzeyi ${Math.round(surface)} — çukurda perde inmemeli`,
+          );
+        }
+        continue;
+      }
+
+      const base = row * TILE;
+      for (let k = 0; k < SUB; k++) {
+        const surface = -pos[(x * SUB + k) * 6 + 1];
+        assert.ok(
+          surface >= base - AMP - 0.01 && surface <= base + 0.01,
+          `${stage.name}: sütun ${x} yüzey ${Math.round(surface)} (${base} ± ${AMP} dışında)`,
+        );
+        maxRise = Math.max(maxRise, base - surface);
+      }
+    }
+
+    // 4) oyun kritik: hiçbir diken sütununda perde olmamalı
+    for (const h of s.hazards) {
+      const hx = h.x / TILE;
+      assert.equal(
+        expectedTopRow(s, hx), -1,
+        `${stage.name}: diken sütunu ${hx}'de perde var — diken görünmezdi`,
+      );
+    }
+  }
+
+  pass("Zemin perdesi geometrisi tutarlı (çukurlar açık, indeksler sağlam)", `en fazla yükseliş ${maxRise}px`);
+
+  // 5) gürültü: deterministik ve sınırlı
+  const n1 = makeNoise(1234);
+  assert.equal(n1(10.5), makeNoise(1234)(10.5), "gürültü deterministik değil");
+  for (let i = 0; i < 200; i++) {
+    const v = fbm(n1, i * 0.37, 4);
+    assert.ok(v >= 0 && v <= 1, `fbm aralık dışı: ${v}`);
+  }
+  pass("Gürültü deterministik, fbm 0..1 aralığında");
 }
 
 console.log("\nTüm testler geçti.\n");
