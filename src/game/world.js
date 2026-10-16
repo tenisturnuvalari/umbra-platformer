@@ -23,21 +23,22 @@ export const TUNE = {
   w: 28,
   h: 40,
 
-  run: 320,
+  run: 330,
   accelGround: 3400,
-  accelAir: 1900,
-  frictionGround: 3600,
-  frictionAir: 500,
+  accelAir: 1500,    // havada yön değişimi zayıf → zıplama manevrası zayıf, oyun yürüyüş eksenli
+  frictionGround: 3800,
+  frictionAir: 320,  // düşük → bırakınca süzülür, kısa hopta yine de ilerler
 
-  gravity: 2500,
+  gravity: 2600,
   maxFall: 1400,
-  jump: 840,
-  jumpCut: 0.42,
+  jump: 470,         // kısa hamle (~42px): engeli aşmak için, Mario zıplaması değil
+  jumpCut: 0.55,
 
   coyote: 0.1,
   buffer: 0.12,
   lookAhead: 90,
 
+  stepUp: 44,        // 1 karo (40px) adıma zıplamadan tırmanır — yürüyüş oyununun belkemiği
   climb: 215,        // merdivende çıkış hızı
   pull: 230,         // tutulan kutunun oyuncuya yetişme hızı
   grabGap: 6,        // tutulan kutu ile oyuncu arasındaki boşluk
@@ -385,11 +386,31 @@ function gripUpdate(w, dt, input) {
   }
 }
 
-/** Oyuncunun tam önündeki kutuyu kaydırır (yalnız yerdeyken, itme hissi için). */
+/**
+ * Tutulan kutunun y-eksenini oyuncuya yaklaştırır: oyuncu bir basamaktan
+ * çıkarken/inişte kutu hemen yanında kalsın. X takibi `gripUpdate`'te; burada
+ * yalnızca dikey uyum. Yerçekimi `updateCrates`'ta uygulanır (burada tekrarlanmaz).
+ */
+function gripDrop(w) {
+  const p = w.player;
+  const c = p.grab;
+  if (!c || c.heldBlocked) return;
+  // kutu, oyuncunun basamak üstü/altına yumuşak oturması için en fazla bir karo kayar
+  const targetY = p.y + p.h - c.h;       // ayak hizası
+  const dy = targetY - c.y;
+  const maxStep = TILE;
+  const stepY = Math.abs(dy) <= maxStep ? dy : Math.sign(dy) * maxStep;
+  if (stepY === 0) return;
+  const solids = crateSolids(w, c, w.cScratch);
+  const cand = { x: c.x, y: c.y + stepY, w: c.w, h: c.h };
+  if (!blocked(cand, solids)) { c.y += stepY; c.vy = 0; c.onGround = false; }
+}
+
+/** Kutunun tam önündeki engeli ittirir — basamak tırmanması için değil, itmek için. */
 function pushAhead(w, dx) {
   if (dx === 0) return;
   const p = w.player;
-  if (!p.onGround) return;              // havadayken itilmez → üstüne zıplanır
+  if (!p.onGround) return;              // havadayken itilmez; itme yalniz yerdeyken
   const probe = { x: p.x + dx, y: p.y, w: p.w, h: p.h };
   for (const c of w.crates) {
     if (!overlaps(probe, c)) continue;
@@ -398,6 +419,61 @@ function pushAhead(w, dx) {
     moveXOnly(c, dx, crateSolids(w, c, w.cScratch));
     return;
   }
+}
+
+/**
+ * Basamak tırmanma (step-up): yürüyüş oyununun belkemiği. Önündeki basamak
+ * `stepUp`'dan kısaysa oyuncu zıplamadan otomatik tırmanır ( Mario hissini kırar,
+ * yürüyüşü akıcı kılar). Uygulanırsa true döner.
+ */
+function tryStepUp(w, dx) {
+  const p = w.player;
+  if (!p.onGround || dx === 0) return false;
+  const s = w.stage.sets.solid;
+
+  const probe = { x: p.x + dx, y: p.y, w: p.w, h: p.h };
+  let hit = null;
+  for (const b of s) { if (overlaps(probe, b)) { hit = b; break; } }
+  if (!hit) return false;
+
+  // basamak çok yüksekse tırmanma
+  const rise = (p.y + p.h) - hit.y;              // basamağın üstüne kaç px yükselme
+  if (rise <= 0 || rise > TUNE.stepUp) return false;
+
+  const lifted = { x: p.x + dx, y: p.y - rise, w: p.w, h: p.h };
+  if (blocked(lifted, w.pSolids)) return false;  // üstü kapalıysa tırmanma
+
+  p.y -= rise;
+  p.x += dx;
+  p.onGround = true;
+  p.vy = 0;
+  return true;
+}
+
+/**
+ * Aşağı basamak (step-down): yere basıyorken hemen önümüzde `stepUp` kadar
+ * aşağıda zemin varsa düşmeden oturur → merdiven/teras inişi akıcı olur.
+ * Zemin yoksa (uçurum) false döner ve normal yerçekimi devreye girer.
+ * Güvenli: zemin bulunamazsa hiçbir şey yapmaz, oyun normal davranışa döner.
+ */
+function tryStepDown(w, dx) {
+  const p = w.player;
+  if (!p.onGround || dx === 0) return false;
+  const feet = p.y + p.h;
+  const tx = p.x + dx;
+
+  // düz zemin ya da önüzde duvar/yukarı basamak → normal hareket
+  if (blocked({ x: tx + 3, y: feet - 3, w: p.w - 6, h: 6 }, w.pSolids)) return false;
+  if (blocked({ x: tx, y: p.y, w: p.w, h: p.h }, w.pSolids)) return false;
+
+  // stepUp kadar aşağıda zemin yoksa uçurum → düş (adım yok)
+  if (!blocked({ x: tx + 3, y: feet, w: p.w - 6, h: TUNE.stepUp + 6 }, w.pSolids)) return false;
+
+  // var: yatay kay, sonra zemine otur
+  moveXOnly(p, dx, w.pSolids);
+  const out = moveBody(p, 0, TUNE.stepUp + 6, w.pSolids);
+  if (out.landed) { p.onGround = true; p.vy = 0; return true; }
+  return false;   // beklenmedik → bırak, yerçekimi halleder
 }
 
 function updateCrates(w, dt) {
@@ -599,8 +675,10 @@ function updatePlayer(w, dt, input) {
     // --- merdivene gir (hareketten önce: düşerken de yakalanır)
     if (!(up || down) || !enterLadder(w, up, down)) {
       const dx = p.vx * dt;
+      // tutulan kutuyla birlikte yürü: adım tırmanma veya yükseklik farkını yumuşak geç
+      gripDrop(w);
       pushAhead(w, dx);
-      moveBody(p, dx, p.vy * dt, w.pSolids);
+      if (!tryStepUp(w, dx) && !tryStepDown(w, dx)) moveBody(p, dx, p.vy * dt, w.pSolids);
     }
 
     if (wasAir && p.onGround) w.events.push({ type: "land" });

@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "UMBRA — penguenin kontrol ettiği, sisli ve yağmurlu 2.5D karanlık platformer (Three.js). Sandık it/çek, merdiven, hareketli platform.",
+  "description": "UMBRA — penguenin kontrol ettiği, sisli ve yağmurlu 2.5D karanlık yürüyüş-odaklı platformer (Three.js). Küçük zıplama, sandık it/çek, merdiven, hareketli platform.",
   "license": "MIT",
   "scripts": {
     "test": "node --import ./test/register.mjs ./test/smoke.mjs",

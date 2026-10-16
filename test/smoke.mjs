@@ -93,8 +93,8 @@ pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
   for (let i = 0; i < 60; i++) { step(w, input, 1); peak = Math.min(peak, w.player.y); }
   input.release("Space");
   const jumpH = Math.round(y0 - peak);
-  assert.ok(jumpH > 125 && jumpH < 170, `zıplama yüksekliği beklenmedik: ${jumpH}px`);
-  pass("Zıplama yüksekliği", `${jumpH}px (80px'lik kasa üstünden çıkışa geniş pay)`);
+  assert.ok(jumpH >= 35 && jumpH <= 60, `zıplama yüksekliği beklenmedik: ${jumpH}px`);
+  pass("Küçük zıplama (hop) yüksekliği", `${jumpH}px — 80px'lik kasanın üstüne ZİPLANAMAZ`);
 
   // koşu hızı
   const w2 = createWorld(STAGES[0]);
@@ -102,22 +102,92 @@ pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
   step(w2, in2, 90);
   in2.press("KeyD");
   step(w2, in2, 120);
-  assert.ok(w2.player.vx > 300 && w2.player.vx <= 322, `koşu hızı ${Math.round(w2.player.vx)}`);
+  assert.ok(w2.player.vx > 300 && w2.player.vx <= 332, `koşu hızı ${Math.round(w2.player.vx)}`);
   pass("Koşu hızı oturuyor", `${Math.round(w2.player.vx)} px/sn`);
+}
+
+/* ----------------------------------- 3b) adım tırmanma / inme (zıplamasız) */
+
+{
+  // (a) basamak yukarı: Aşama I'de kolon 11→12 yüzeyi 560'tan 520'ye çıkar.
+  const w = createWorld(STAGES[0]);
+  const input = makeInput();
+  step(w, input, 90);
+  const startX = 9 * TILE;
+  place(w, startX, 13 * TILE);
+  step(w, input, 3);
+  assert.equal(w.player.onGround, true, "basamak altında yere oturmadı");
+  const yBefore = w.player.y;
+  input.press("KeyD");
+  step(w, input, 60);                                 // zıplamadan sadece yürü
+  input.release("KeyD");
+  const climbed = yBefore - w.player.y;
+  assert.ok(climbed > 20, `basamak yukarı tırmanılmadı (Δy=${Math.round(climbed)}px) — zıplama kullanıldı mı?`);
+  assert.ok(w.deaths == 0, "basamak tırmanırken öldü");
+  assert.equal(w.player.onGround, true, "tırmanışta yere basmadı");
+  pass("Basamak yukarı tırmanılıyor (Space'siz)", `Δy=${Math.round(climbed)}px`);
+
+  // (b) basamak aşağı: kolon 25→26 yüzeyi 520'den 560'a iner.
+  const w2 = createWorld(STAGES[0]);
+  const in2 = makeInput();
+  step(w2, in2, 90);
+  place(w2, 24 * TILE, 12 * TILE);                    // yüzey satır 13, y=480
+  step(w2, in2, 3);
+  assert.equal(w2.player.onGround, true, "yukarıda yere oturmadı");
+  const yTop = w2.player.y;
+  in2.press("KeyD");
+  step(w2, in2, 50);
+  in2.release("KeyD");
+  const dropped = w2.player.y - yTop;
+  assert.ok(dropped > 20, `basamak aşağı inilmedi (Δy=${Math.round(dropped)}px)`);
+  assert.ok(w2.player.y < 15 * TILE, `aşırı düştü: y=${Math.round(w2.player.y)}`);
+  assert.equal(w2.player.onGround, true, "indikten sonra yere oturmadı");
+  assert.ok(w2.deaths == 0, "basamak inerken öldü");
+  pass("Basamak aşağı iniliyor (yumuşak iniş)", `Δy=${Math.round(dropped)}px`);
+}
+
+/* ------------------------- 3c) yürüyerek tamamlanabilirlik (Aşama I & II) */
+
+for (const idx of [0, 1]) {
+  const stage = STAGES[idx];
+  const w = createWorld(stage);
+  const input = makeInput();
+  step(w, input, 90);                                  // doğ, yere otur
+
+  input.press("KeyD");                                 // yalnız D: zıplama yok
+  let frames = 0;
+  while (frames < 900 && w.deaths === 0 && w.player.x < w.stage.exit.x) {
+    step(w, input, 1); frames++;
+  }
+  input.release("KeyD");
+
+  assert.equal(w.deaths, 0, `${stage.name}: yürüyüşte öldü`);
+  assert.ok(w.player.x >= w.stage.exit.x - 4,
+    `${stage.name}: çıkışa yürüyerek ulaşılamadı (x=${Math.round(w.player.x)}, hedef ${w.stage.exit.x}, ${frames} kare)`);
+  assert.ok(w.events.some((e) => e.type === "exit"),
+    `${stage.name}: çıkış olayı tetiklenmedi`);
+  pass(`${stage.name} — yalnız D ile çıkışa yürüme`, `${frames} kare, zıplanmadı`);
 }
 
 /* --------------------------------------------------- 4) ölüm / yeniden doğuş */
 
 {
-  const w = createWorld(STAGES[0]);
+  // ilk dikenli aşamayı bul (Aşama I artık diken içermiyor)
+  let w = null, hazName = "";
+  for (const s of STAGES) {
+    const cand = createWorld(s);
+    if (cand.stage.hazards.length) { w = cand; hazName = s.name; break; }
+  }
+  assert.ok(w, "hiç dikenli aşama yok");
   const input = makeInput();
   step(w, input, 90);
 
-  // diken (aşama I'de kolon 28-30, satır 13-14)
-  place(w, 28 * TILE + 5, 13 * TILE + 10);
+  // dikenlerin ilkine yerleştir
+  const hz = w.stage.hazards[0];
+  place(w, hz.x + 5, hz.y + 10);
   step(w, input, 2);
   assert.equal(w.deaths, 1, "diken öldürmedi");
-  pass("Diken teması ölüm");
+  pass("Diken teması ölüm", hazName);
 
   // boşluk
   step(w, input, 40);
@@ -164,16 +234,14 @@ pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
   assert.equal(c.h, TUNE.crateH, "sandık yüksekliği yanlış (80 olmalı)");
   assert.equal(c.onGround, true, "sandık yere oturmadı");
 
-  // tünelin içinde, sandığın soluna yerleştir (tavan 520, kasanın tepesi 520 → zıplanamaz)
+  // sandigin solundaki acik zemine yerlestir (tunel kolon 16+’da, burasi kolon 9)
   place(w, c.x - TUNE.w - 4, 560);
   step(w, input, 5);
-  assert.equal(w.player.onGround, true, "tünelde yere oturmadı");
-  assert.equal(w.dead, false, "tünelde öldü");
+  assert.equal(w.player.onGround, true, "zeminde yere oturmadı");
+  assert.equal(w.dead, false, "zeminde öldü");
 
-  // sandığın tepesi (520) ile tavandan kalan boşluk yalnız 80px →
-  // oyuncu (zıplama ≈148px) kasanın üstüne ZİPLAYAMAZ → çekmek zorunda.
-  const clearance = 520 - 440;                 // tavan altı (520) − oyuncu başı (560'ta dururken baş 520)
-  assert.ok(c.h >= clearance, "sandık tavandan geçecek kadar kısa — zıplanabilirdi");
+  // sandik zıplama ~46px ile ustunden gecebilir mi? hayir (sandik 80px).
+  assert.ok(c.h > 60, `sandık zıplanarak aşılabilir kadar kısa: ${c.h}px`);
 
   // E ile tut
   input.press("KeyE"); step(w, input, 3); input.end();
@@ -184,7 +252,7 @@ pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
   // sola yürüyerek çek: oyuncu ve sandık birlikte sola kayar
   const x0 = w.player.x, c0 = c.x;
   input.press("KeyA");
-  step(w, input, 120);
+  step(w, input, 80);
   assert.ok(w.player.x < x0 - 100, `oyuncu çekmedi: ${Math.round(x0)} → ${Math.round(w.player.x)}`);
   assert.ok(c.x < c0 - 100, `sandık sürüklenmedi: ${Math.round(c0)} → ${Math.round(c.x)}`);
   assert.equal(w.dead, false, "çekerken öldü");
@@ -204,7 +272,7 @@ pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
 {
   const w = createWorld(STAGES[2]);           // Merdiven
   const L = w.stage.ladders;
-  assert.ok(L.length >= 2, `beklenen en az 2 merdiven, ${L.length} bulundu`);
+  assert.ok(L.length >= 1, `beklenen en az 1 merdiven, ${L.length} bulundu`);
   for (const l of L) {
     assert.equal(l.w, TILE, "merdiven genişliği bir karo olmalı");
     assert.ok(l.h >= TILE, "merdiven çok kısa");

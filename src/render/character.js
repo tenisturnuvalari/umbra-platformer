@@ -131,6 +131,8 @@ export class Character {
     this.phase = 0;
     this.breathe = Math.random() * 10;
     this.squash = 0;          // iniş squash'ı (0..1)
+    this.size = 1.5;          // pengueni daha iri göster (çarpışma kutusu 40px'te sabit)
+    this.root.scale.set(this.size, this.size, this.size);
   }
 
   setRim(color) {
@@ -143,7 +145,7 @@ export class Character {
   pose(o) {
     const { mode, speed = 0, facing = 1, dt = 1 / 60 } = o;
     this.breathe += dt;
-    this.root.scale.x = facing;
+    this.root.scale.x = facing * this.size;
 
     // iniş squash sönümlenir
     this.squash = Math.max(0, this.squash - dt * 4.5);
