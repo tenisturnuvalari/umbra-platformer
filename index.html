@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>UMBRA — gölge fazı platformer</title>
+<title>UMBRA — karanlık platformer</title>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; overflow: hidden; background: #05070a; }
@@ -61,8 +61,6 @@
   }
   #stage-title { font-size: 11px; }
   #stage-title b { display: block; font-size: 17px; letter-spacing: .22em; font-weight: 600; margin-bottom: 2px; }
-  #phase[data-phase="light"]  { color:#ffb765; border-color:#ffb765; box-shadow: 0 0 26px rgba(255,160,60,.22) inset; }
-  #phase[data-phase="shadow"] { color:#63d8ff; border-color:#63d8ff; box-shadow: 0 0 26px rgba(79,214,255,.22) inset; }
 
   #hint { align-self: center; text-align: center; opacity: .68; font-size: 11.5px; letter-spacing: .1em; min-height: 1.4em; max-width: 70ch; }
 
@@ -116,8 +114,7 @@
 
   <div id="hud">
     <div class="row">
-      <div class="chip" id="stage-title"><b>UMBRA</b><span id="stage-sub">gölge fazı</span></div>
-      <div class="chip" id="phase" data-phase="light">Faz · Işık</div>
+      <div class="chip" id="stage-title"><b>UMBRA</b><span id="stage-sub">karanlık macera</span></div>
     </div>
     <div id="hint"></div>
     <div class="row">
@@ -132,16 +129,17 @@
   <div id="boot">
     <div class="boot-inner">
       <h1>UMBRA</h1>
-      <p class="sub">gölge fazı platformer</p>
+      <p class="sub">karanlık macera</p>
       <div class="keys">
         <span>A / D — yürü</span>
         <span>SPACE — zıpla</span>
-        <span>SHIFT — faz değiştir</span>
+        <span>W / S — merdiven</span>
+        <span>E — tut / bırak</span>
         <span>R — yeniden</span>
       </div>
       <button id="start">BAŞLA</button>
       <p class="note">
-        Zemin her fazda katıdır. Platformlar fazla göre var olur ya da yok olur.<br />
+        Sandıkları it, çek ve üstlerine zıpla · Merdivenlerle in-çık · Hareketli platformları yakala.<br />
         Ses tarayıcı kısıtları nedeniyle oyun başlarken açılır.
       </p>
     </div>

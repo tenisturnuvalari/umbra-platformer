@@ -1,42 +1,57 @@
 # UMBRA
 
-**Limbo'nun hissi, farklı bir mekaniğe sahip, sisli ve yağmurlu 2.5D gölge platformer.**
+**Limbo'nun hissi, farklı bir mekaniğe sahip, sisli ve yağmurlu 2.5D karanlık platformer.**
 
-Oyun, oyun mantığı (fizik, bulmaca, aşamalar) ile görsel katman (Three.js) tamamen
-birbirinden ayrılmış iki katmandan oluşur. Bu sayede oyun mantığı tarayıcı olmadan
-Node'da test edilebilir — `test/smoke.mjs` bunu yapar ve 18 doğrulama içerir.
+Kahraman bir **penguen**: yürür, zıplar, merdiven çıkar, sandık iter/çeker ve arkasından
+gelen bir avciden kaçar. Oyun, oyun mantığı (fizik, bulmaca, aşamalar) ile görsel katman
+(Three.js) tamamen birbirinden ayrılmış iki katmandan oluşur. Bu sayede oyun mantığı
+tarayıcı olmadan Node'da test edilebilir — `test/smoke.mjs` bunu yapar ve 20 doğrulama
+içerir.
 
 > Limbo'nun (Playdead) asıl kodu kapalı kaynaklıdır; burada onların hiçbir varlığı
 > (grafik, ses, karakter) kullanılmıyor. Tüm görseller ve sesler kodla üretiliyor.
 
 ---
 
-## Mekanik: faz sistemi
+## Mekanikler
 
-Dünya, üst üste binen iki fazdan oluşuyor:
+Zıplamanın ötesinde beş temel mekanik var:
+
+| Mekanik | Nasıl çalışır |
+| ------- | ------------- |
+| **Sandık it / çek** | `E` ile tut, yürüyerek sürükle; bırakınca bırakır. Tünelde **çekmek** zorunda kalırsın (kasa tavandan geçmez, zıplanamaz). |
+| **Merdiven** | `W` / `S` (veya `↑` `↓`) ile in-çık; tepeden yana geçerek çık, `SPACE` ile merdivenden atla. |
+| **Hareketli platform** | Boşlukta süzülen platformlar seni ve taşıdığın kasayı taşır; zamanla yakalan. |
+| **Diken / çukur** | Temas ölüm. Çukura düşülür, dikenlere basılır. |
+| **Avcı** | Kaçış aşamasında arkandan bir şey koşuyor; yakalanırsan ölürsün. |
+
+**Sandık bulmacası (Aşama II):** alçak bir geçitte sıkışan 80px'lik kasa, tavan yüzünden
+üstüne zıplanamaz — kasayı **geri yürüyerek çekmek** zorundasın, sonra üstüne zıplayıp
+sekiyorsun. İtiş/çekiş hissi için kasayı iten oyuncu da duvara dayanınca durur.
+
+**Harita sözdizimi:**
 
 | İşaret | Anlamı |
 | ------ | ------ |
-| `#`    | **Her fazda katı** zemin — asla kaybolmaz |
-| `l`    | Yalnız **Işık** fazında katı platform |
-| `s`    | Yalnız **Gölge** fazında katı platform |
-| `^`    | Diken — her fazda ölüm |
+| `#`    | Katı zemin / duvar |
+| `^`    | Diken — temas ölüm |
+| `P`    | Başlangıç |
+| `E`    | Çıkış |
+| `C`    | Kontrol noktası |
+| `L`    | Merdiven (dikey küme) |
+| `B`    | Sandık (40×80, itilip çekilebilir) |
 
-`SHIFT` ile faz değiştirirsin. Ayaklarının altındaki platform o an kaybolur; bu yüzden
-asıl bulmaca "ne zaman değiştiririm"dir.
-
-**Dizayn ilkesi:** zemin asla kaybolmaz, sadece *üzerinde durduğun platform* kaybolur.
-Oyuncu haksız yere ölmez; her ölüm bir öğrenmedir. Bloğun içine düşecekse geçiş otomatik
-iptal edilir (takılı kalma bug'ı yok).
+Hareketli platformlar harita satırında değil, aşama tanımında `{ col, row, w, axis, dist, speed, phase }` ile bildirilir.
 
 ## Aşamalar
 
 | # | Aşama | Ne öğretir |
 | - | ----- | ---------- |
-| I | **Uyanış** | Hareket, zıplama, teras merdiveni, dikenler |
-| II | **Faz Kırılması** | Boşlukta faz değişimi, faz duvarı |
-| III | **Yarık** | Zeminin faza göre yok olması, şimşek, ağır yağmur |
-| IV | **Kaçış** | Arkandan gelen avcı — yakalanırsan ölürsün |
+| I | **Uyanış** | Hareket, zıplama, teras, dikenler |
+| II | **Yük** | Alçak geçitte sandık **çekme**, üstüne zıplama |
+| III | **Merdiven** | İki merdivenle dikey iniş-çıkış, şimşek |
+| IV | **Hareket** | Üç hareketli platformla boşluk geçişi |
+| V | **Kaçış** | Avcıdan kaçış: çukur, platform, diken, kasa itme |
 
 Her aşamanın kendi ambiyansı var: sis yoğunluğu, yağmur şiddeti, ışık rengi, bloom.
 
@@ -45,8 +60,9 @@ Her aşamanın kendi ambiyansı var: sis yoğunluğu, yağmur şiddeti, ışık 
 | Tuş | Aksiyon |
 | --- | ------- |
 | `A` `D` / `←` `→` | Yürü |
-| `SPACE` / `W` | Zıpla (basılı tut = daha yüksek) |
-| `SHIFT` / `Q` | Faz değiştir |
+| `SPACE` | Zıpla (basılı tut = daha yüksek) · merdivenden atla |
+| `W` `S` / `↑` `↓` | Merdivende in-çık |
+| `E` | Sandık tut / bırak |
 | `R` | Aşamayı baştan başlat |
 
 ---
@@ -64,11 +80,20 @@ src/core/audio.js       Prosedürel ses (WebAudio, sıfır ses dosyası)
 src/core/input.js       Klavye + kenar (edge) algılama
 src/render/scene.js     Three.js sahnesi: ışık, gölge haritası, sis, yağmur, DOF, bloom
 src/render/terrain.js   Katmanlı ortam: dağ silüetleri, zemin perdesi, kadraj kütleleri
-src/render/character.js Prosedürel 3D iskelet + animasyon + avcı figürü
-src/levels/index.js     Aşama verisi (harita + ambiyans)
+src/render/character.js Prosedürel penguen iskeleti + animasyon + avcı figürü
+src/levels/index.js     Aşama verisi (harita + ambiyans + platformlar)
 test/smoke.mjs          Kafaüstü duman testi (Node, render yok — 20 doğrulama)
 test/three-stub.mjs     "three" stub'ı: geometri mantığını Node'da test etmek için
 ```
+
+### Karakter
+
+Penguen tamamen kodla kurulmuş küre + kutu parçalardan oluşur (sculpt/rig'lenmiş model
+YOK — dürüst not). Yan görünümde bacaklar ve kanatlar **`rotation.z`** ile sallanır
+(yanal salınım kameradan görünür); eski `rotation.x` hatası uzuvları kameradan
+uzaklaştırıp yaklaştırırdı — yan oyunda görünmezdi. Yürüyüş/koşu hızla yumuşak geçişle
+birleşir, kalçada yalpalama (`rotation.x`) ve öne eğilme (`rotation.z`) ile penguen
+yürüyüşü taklit edilir. İnişte hafif squash.
 
 ### Görsel katman
 
@@ -89,14 +114,14 @@ test/three-stub.mjs     "three" stub'ı: geometri mantığını Node'da test etm
 - **FogExp2** +16 adet kayan sis kartı, **yağmur** `LineSegments` ile prosedürel
 - **Şimşek** (Aşama III): ışık parlaması + gecikmeli gürültü
 - **Bloom** (UnrealBloomPass), ACES tone mapping, letterbox, film grain, vinyet
-- Bloklar `InstancedMesh`; kalıcı zemin neredeyse saf siyah, faz platformlarının
-  kenarları renkli ışık çizgisi (okunmaları gerekir)
+- Bloklar `InstancedMesh`; zemin neredeyse saf siyah. Sandık, merdiven ve hareketli
+  platformlar ayrı mesh'ler olarak çizilir.
 
 ### Ses
 
 Sıfır ses dosyası; her şey WebAudio ile sentezleniyor: yağmur (brown gürültü + bant geçiren +
-LFO dalgalanma), rüzgar, zıplama, iniş, adım, faz geçişi, reddetme, ölüm, kontrol noktası
-zili, çıkış, şimşek gürültüsü.
+LFO dalgalanma), rüzgar, zıplama (yumuşak "hup"), iniş, adım, sandık tut/bırak, merdiven
+tıkı, ölüm (boğuk çakılış), kontrol noktası zili, çıkış, şimşek gürültüsü.
 
 ### Test
 
@@ -104,10 +129,12 @@ zili, çıkış, şimşek gürültüsü.
 npm test        # node test/smoke.mjs
 ```
 
-Doğrulananlar: harita bütünlüğü, doğuş/çıkış güvenliği, zemin boşluklarının geçilebilirliği,
-zıplama/koşu değerleri, ölüm + yeniden doğuş, kontrol noktaları, faz güvenliği, ışık zemininde
-düşme, avcının yakalaması, aşama I merdiven geometrisi, faz köprüsünün boşluğu örtmesi,
-**zemin perdesi geometrisi** (NaN/indeks/diken görünürlüğü) ve gürültü determinizmi.
+Doğrulananlar: harita bütünlüğü (satır/karakter), doğuş/çıkış güvenliği (çıkış altı zemin),
+zıplama/koşu değerleri, diken/çukur ölümü + yeniden doğuş, kontrol noktaları,
+**sandık tut/çek/bırak**, **merdivene giriş + tırmanış + üstten çıkış**, **hareketli
+platform taşıması**, avcının yakalaması, **faz mekaniğinin tamamen kaldırıldığı**,
+`KeyE` girdisi, **zemin perdesi geometrisi** (NaN/indeks/diken görünürlüğü) ve gürültü
+determinizmi.
 
 **Test etmeyenler:** render/görsel kompozisyon, ses karışımı, FPS. Bunlar tarayıcıda sende.
 
@@ -123,13 +150,14 @@ npm start          # npx serve
 python -m http.server 8080
 ```
 
-GitHub Pages üzerinde build adımı olmadan çalışır.
+GitHub Pages üzerinde build adımı olmadan çalışır: `https://tenisturnuvalari.github.io/umbra-platformer/`
 
 ## Yol haritası
 
 - [x] 3D sahne, gölge haritası, sis, yağmur, şimşek
-- [x] Prosedürel karakter iskeleti + animasyon
-- [x] 4 aşama (sonuncusu kaçış sahnesi)
+- [x] Prosedürel penguen iskeleti + animasyon (rotation.z düzeltmesiyle)
+- [x] Sandık it/çek, merdiven, hareketli platform mekanikleri
+- [x] 5 aşama (sonuncusu kaçış sahnesi)
 - [x] Prosedürel ses motoru
 - [ ] Kayıtlı müzik/ses (CC0 lisanslı, kaynak doğrulanmış)
 - [ ] Daha zengin figürler (rig'lenmiş glTF modelleri — harici asset gerekir)

@@ -61,7 +61,20 @@ export function moveBody(body, dx, dy, solids) {
   return out;
 }
 
-/** Verilen dikdörtgen herhangi bir solid ile kesişiyor mu? (faz değişimi güvenliği için) */
+/**
+ * Yalnız X ekseninde kaydırır (kutu itme/çekme için).
+ * `onGround` alanına dokunmaz — kutunun zemine değdiğini biliriz.
+ * @returns {number} gerçekleşen yer değiştirme (engellendiyse 0'a iner)
+ */
+export function moveXOnly(body, dx, solids) {
+  if (dx === 0) return 0;
+  const before = body.x;
+  const out = { hitX: false, hitY: false, landed: false, bonked: false };
+  sweep(body, dx, "x", solids, out);
+  return body.x - before;
+}
+
+/** Verilen dikdörtgen herhangi bir solid ile kesişiyor mu? (merdiven/platform güvenliği için) */
 export function blocked(box, solids) {
   for (let i = 0; i < solids.length; i++) {
     if (overlaps(box, solids[i])) return true;

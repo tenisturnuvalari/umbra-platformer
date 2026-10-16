@@ -195,7 +195,7 @@ export class StageScene {
     this.moon = moon;
     this.moonBase = amb.moonI;
 
-    // oyuncunun feneri (ışık fazında)
+    // oyuncunun feneri (yumuşak, oyuncuyu takip eden ışık)
     const spot = new THREE.SpotLight(0xffc98f, 55000, 1500, Math.PI / 4.4, 0.65, 1.6);
     spot.castShadow = true;
     spot.shadow.mapSize.set(1024, 1024);
@@ -215,17 +215,14 @@ export class StageScene {
 
     this.blockGroups = {};
     const defs = {
-      // kalıcı zemin: neredeyse saf siyah (referanstaki Limbo silüeti gibi)
+      // zemin: neredeyse saf siyah (referanstaki Limbo silüeti gibi)
       solid: { fill: mkMat(0x04060a, 0x000000, 0), rim: new THREE.MeshBasicMaterial({ color: amb.rim, transparent: true, opacity: 0.3 }) },
-      // faz platformları: okunmaları gerekir → kenar ışığı güçlü kalır
-      light: { fill: mkMat(0x171209, 0xff9a45, 0.5), rim: new THREE.MeshBasicMaterial({ color: amb.glowLight, transparent: true, opacity: 0.95 }) },
-      shadow: { fill: mkMat(0x08111c, 0x3fc9ff, 0.45), rim: new THREE.MeshBasicMaterial({ color: amb.glowShadow, transparent: true, opacity: 0.95 }) },
     };
-    this._track(defs.solid.fill, defs.solid.rim, defs.light.fill, defs.light.rim, defs.shadow.fill, defs.shadow.rim);
+    this._track(defs.solid.fill, defs.solid.rim);
 
     for (const key of Object.keys(defs)) {
       const tiles = stage.sets[key];
-      if (!tiles.length) { this.blockGroups[key] = null; continue; }   // bu aşamada o faz bloğu yok
+      if (!tiles.length) { this.blockGroups[key] = null; continue; }
       const meshes = new THREE.Group();
       const m = new THREE.InstancedMesh(tileGeo, defs[key].fill, tiles.length);
       m.castShadow = true;
@@ -233,7 +230,7 @@ export class StageScene {
 
       const exposed = tiles.filter((t) => {
         const above = stage.grid[t.y / TILE - 1]?.[t.x / TILE] ?? "#";
-        return !(key === "solid" ? above === "#" : above === (key === "light" ? "l" : "s"));
+        return above !== "#";
       });
       const rimCount = exposed.length;
       const rim = rimCount > 0 ? new THREE.InstancedMesh(edgeGeo, defs[key].rim, rimCount) : null;
@@ -299,6 +296,74 @@ export class StageScene {
     this.scene.add(spikes);
     this.spikesMesh = spikes;
 
+    // --- merdivenler: iki dikey ray + basamaklar
+    this.ladderMeshes = new THREE.Group();
+    const ladRailGeo = new THREE.BoxGeometry(4.5, 1, DEPTH * 0.3);
+    const ladRungGeo = new THREE.BoxGeometry(TILE - 8, 3.4, DEPTH * 0.24);
+    const ladMat = new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.7, metalness: 0.3, emissive: 0x0a1018, emissiveIntensity: 0.3 });
+    this._track(ladRailGeo, ladRungGeo, ladMat);
+    for (const l of stage.ladders) {
+      const grp = new THREE.Group();
+      const cxL = l.x + l.w / 2;
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(ladRailGeo, ladMat);
+        rail.scale.y = l.h;
+        rail.position.set(cxL + side * (l.w / 2 - 3), -(l.y + l.h / 2), 0);
+        rail.castShadow = true;
+        grp.add(rail);
+      }
+      const rungs = Math.max(1, Math.floor(l.h / TILE));
+      for (let i = 0; i < rungs; i++) {
+        const rung = new THREE.Mesh(ladRungGeo, ladMat);
+        rung.position.set(cxL, -(l.y + (i + 0.5) * TILE), 0);
+        rung.castShadow = true;
+        grp.add(rung);
+      }
+      this.ladderMeshes.add(grp);
+    }
+    this.scene.add(this.ladderMeshes);
+
+    // --- hareketli platformlar
+    this.platformMeshes = new THREE.Group();
+    const platGeo = new THREE.BoxGeometry(1, 1, DEPTH * 0.7);
+    const platMat = new THREE.MeshStandardMaterial({ color: 0x141a22, roughness: 0.6, metalness: 0.4, emissive: 0x0c141c, emissiveIntensity: 0.4 });
+    const platRim = new THREE.MeshBasicMaterial({ color: amb.rim, transparent: true, opacity: 0.55 });
+    this._track(platGeo, platMat, platRim);
+    for (const pl of world.platforms) {
+      const grp = new THREE.Group();
+      const body = new THREE.Mesh(platGeo, platMat);
+      body.scale.set(pl.w, pl.h, 1);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      const rimTop = new THREE.Mesh(platGeo, platRim);
+      rimTop.scale.set(pl.w, 3.2, 1);
+      rimTop.position.y = pl.h / 2 - 1.6;
+      grp.add(body, rimTop);
+      this.platformMeshes.add(grp);
+    }
+    this.scene.add(this.platformMeshes);
+
+    // --- sandıklar: 40×80 ahşap kasa
+    this.crateMeshes = new THREE.Group();
+    const crateGeo = new THREE.BoxGeometry(1, 1, DEPTH * 0.62);
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x241d16, roughness: 0.85, metalness: 0.05, emissive: 0x120d08, emissiveIntensity: 0.25 });
+    const crateRim = new THREE.MeshBasicMaterial({ color: amb.glowLight, transparent: true, opacity: 0.4 });
+    this._track(crateGeo, crateMat, crateRim);
+    for (const c of world.crates) {
+      const grp = new THREE.Group();
+      const body = new THREE.Mesh(crateGeo, crateMat);
+      body.scale.set(c.w, c.h, 1);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      // kenar çerçevesi: ince dikdörtgen halka hissi
+      const frame = new THREE.Mesh(crateGeo, crateRim);
+      frame.scale.set(c.w - 5, c.h - 5, 1);
+      frame.position.z = DEPTH * 0.31;
+      grp.add(body, frame);
+      this.crateMeshes.add(grp);
+    }
+    this.scene.add(this.crateMeshes);
+
     // --- çıkış: ışık yarığı + nokta ışığı
     if (stage.exit) {
       const e = stage.exit;
@@ -352,7 +417,6 @@ export class StageScene {
       this.creature = null;
     }
 
-    this.phaseMix = { light: 1, shadow: 0 };
     this.spotMix = 1;
   }
 
@@ -408,8 +472,10 @@ export class StageScene {
     };
     kill(this.backdrop); kill(this.ridges); kill(this.curtain); kill(this.foreground);
     kill(this.fogCards); kill(this.rain); kill(this.exitGroup);
+    kill(this.ladderMeshes); kill(this.platformMeshes); kill(this.crateMeshes);
     this.ridges = null; this.curtain = null; this.foreground = null;
     this.exitGroup = null; this.fogCards = null; this.rain = null; this.backdrop = null;
+    this.ladderMeshes = null; this.platformMeshes = null; this.crateMeshes = null;
     if (this.blockGroups) for (const k of Object.keys(this.blockGroups)) kill(this.blockGroups[k]?.meshes);
     if (this.moon) { this.scene.remove(this.moon.target); kill(this.moon); this.moon = null; }
     if (this.spot) { this.scene.remove(this.spot.target); kill(this.spot); this.spot = null; }
@@ -462,39 +528,55 @@ export class StageScene {
     this.moon.intensity = this.moonBase * (1 + this.bolt * 8);
     this.hemi.intensity = 0.55 * (1 + this.bolt * 5);
 
-    // --- faz geçişinin sönümü
-    const targetLight = world.phase === "light" ? 1 : 0.1;
-    const targetShadow = world.phase === "shadow" ? 1 : 0.1;
+    // --- fener (oyuncuyu takip eden yumuşak ışık)
     const k = 1 - Math.exp(-9 * dt);
-    for (const [key, target] of [["light", targetLight], ["shadow", targetShadow]]) {
-      const g = this.blockGroups[key];
-      if (!g) continue;
-      g.fill.opacity += (target - g.fill.opacity) * k;
-      g.rim.opacity += ((target > 0.5 ? 0.95 : 0.12) - g.rim.opacity) * k;
-      g.fill.emissiveIntensity = (target > 0.5 ? 0.62 : 0.06) * (1 + Math.sin(performance.now() / 700) * 0.08);
-    }
-    this.blockGroups.solid.fill.opacity = 1;
-    if (this.blockGroups.solid.rim) this.blockGroups.solid.rim.opacity = 0.8;
-
-    // --- fener
-    const spotTarget = world.phase === "light" ? 1 : 0.06;
-    this.spotMix += (spotTarget - this.spotMix) * k;
-    this.spot.intensity = 55000 * this.spotMix;
+    this.spot.intensity = 42000;
     this.spot.position.set(p.x + p.w / 2, -(p.y + 8), 150);
     this.spot.target.position.set(p.x + p.w / 2 + p.facing * 320, -(p.y + p.h) - 40, -20);
+
+    // --- zemin bloğu opaklığı sabit
+    if (this.blockGroups.solid?.fill) this.blockGroups.solid.fill.opacity = 1;
+    if (this.blockGroups.solid?.rim) this.blockGroups.solid.rim.opacity = 0.8;
+
+    // --- hareketli platform / sandık / merdiven konumları
+    if (this.platformMeshes) {
+      const pl = world.platforms;
+      for (let i = 0; i < this.platformMeshes.children.length; i++) {
+        const m = this.platformMeshes.children[i];
+        const d = pl[i];
+        if (!d) continue;
+        m.position.set(d.x + d.w / 2, -(d.y + d.h / 2), 0);
+      }
+    }
+    if (this.crateMeshes) {
+      const cr = world.crates;
+      for (let i = 0; i < this.crateMeshes.children.length; i++) {
+        const m = this.crateMeshes.children[i];
+        const d = cr[i];
+        if (!d) continue;
+        m.position.set(d.x + d.w / 2, -(d.y + d.h / 2), 0);
+      }
+    }
 
     // --- oyuncu
     const root = this.player.root;
     root.position.set(p.x + p.w / 2, -(p.y + p.h), 0);
-    const mode = world.dead ? "dead" : !p.onGround ? "air" : Math.abs(p.vx) > 30 ? "run" : "idle";
+    const mode = world.dead ? "dead"
+      : p.climbing ? "climb"
+      : !p.onGround ? "air"
+      : Math.abs(p.vx) > 30 ? "run" : "idle";
     this.player.pose({ mode, speed: Math.abs(p.vx), facing: p.facing, dt });
     if (world.dead) root.rotation.z -= dt * 6;
     else root.rotation.z += (0 - root.rotation.z) * k;
 
+    // iniş squash'ı: havadan yere inişte tetikle
+    const air = !p.onGround;
+    if (this._wasAir && !air) this.player.land();
+    this._wasAir = air;
+
     // --- avcı
     if (this.creature && world.chase) {
-      const gy = root.position.y;
-      this.creature.root.position.set(world.chaseX, gy - 2, -26);
+      this.creature.root.position.set(world.chaseX, -(world.chaseY ?? 0) - 2, -26);
       this.creature.root.scale.x = 1;
       this.creature.pose(dt, 300);
     }

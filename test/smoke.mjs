@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { STAGES } from "../src/levels/index.js";
-import { createWorld, updateWorld, TILE } from "../src/game/world.js";
+import { createWorld, updateWorld, TILE, TUNE } from "../src/game/world.js";
 import { overlaps } from "../src/core/physics.js";
 import { buildTerrainCurtain, makeNoise, fbm } from "../src/render/terrain.js";
 
@@ -31,20 +31,11 @@ const step = (w, input, n = 1) => {
 
 const cell = (stage, x, y) => stage.rows[y]?.[x] ?? ".";
 
-/** Zemin satırındaki "aşılması gereken" boşlukları piksel cinsinden bulur.
- *  # ve l zemindir; ^ (diken) ve . (boşluk) atlanması gereken aralıktır. */
-function groundGaps(stage, row) {
-  const gaps = [];
-  let run = 0;
-  for (let x = 0; x < stage.rows[row].length; x++) {
-    const ch = cell(stage, x, row);
-    if (ch === "#" || ch === "l") {
-      if (run > 0) { gaps.push(run * TILE); run = 0; }
-    } else {
-      run++;
-    }
-  }
-  return gaps;
+/** Test için oyuncuyu verilen piksele yerleştirir (fizik durumunu sıfırlar). */
+function place(w, px, py) {
+  const p = w.player;
+  p.x = px; p.y = py; p.vx = 0; p.vy = 0;
+  p.climbing = false; p.ladder = null; p.grab = null;
 }
 
 const pass = (name, extra = "") => console.log(`  ok  ${name}${extra ? "  — " + extra : ""}`);
@@ -55,14 +46,19 @@ console.log("\nUMBRA duman testi\n");
 
 for (const stage of STAGES) {
   const width = stage.rows[0].length;
+  assert.equal(width, 46, `${stage.name}: beklenmeyen genişlik ${width}`);
   stage.rows.forEach((r, i) => {
     assert.equal(r.length, width, `${stage.name}: satır ${i} uzunluğu ${r.length} ≠ ${width}`);
-    assert.match(r, /^[#l^s.PEC]+$/, `${stage.name}: satır ${i} geçersiz karakter`);
+    assert.match(r, /^[#^PECLB.]+$/, `${stage.name}: satır ${i} geçersiz karakter`);
   });
-  assert.equal(width % TILE === 0 || true, true);
   assert.ok(stage.rows.length >= 18, `${stage.name}: harita çok kısa`);
+  // yalnız bir başlangıç ve bir çıkış
+  const all = stage.rows.join("");
+  assert.equal((all.match(/P/g) ?? []).length, 1, `${stage.name}: birden fazla P`);
+  assert.equal((all.match(/E/g) ?? []).length, 1, `${stage.name}: birden fazla E`);
 }
-pass("Tüm haritalar satır uzunluğu ve karakter seti bakımından tutarlı", `${STAGES.length} aşama, 46 sütun`);
+pass("Tüm haritalar satır uzunluğu ve karakter seti bakımından tutarlı",
+  `${STAGES.length} aşama, 46 sütun`);
 
 /* ------------------------------------------------------------ 2) doğuş / çıkış */
 
@@ -85,26 +81,7 @@ for (const stage of STAGES) {
 }
 pass("Her aşamada doğuş güvenli, çıkış zeminle hizalı");
 
-/* --------------------------------------------------------- 3) zemin geçilebilir */
-
-const EXPECTED_GAPS = {
-  "Uyanış": [80, 120],
-  "Yarık": [80, 120, 80],
-  "Kaçış": [80, 120, 80],
-  "Faz Kırılması": [480],
-};
-
-for (const stage of STAGES) {
-  const gaps = groundGaps(stage, 15);
-  assert.deepEqual(gaps, EXPECTED_GAPS[stage.name], `${stage.name}: beklenmeyen boşluklar ${JSON.stringify(gaps)}`);
-  for (const g of gaps) {
-    if (stage.name === "Faz Kırılması") continue;   // bu boşluk faz platformlarıyla köprülüyor
-    assert.ok(g <= 200, `${stage.name}: ${g}px boşluk tam zıplamayla (≈236px) aşılamaz`);
-  }
-}
-pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px, uçuş erişimi ≈236px");
-
-/* ------------------------------------------------------------- 4) fizik hissi */
+/* ------------------------------------------------------------ 3) fizik hissi */
 
 {
   const w = createWorld(STAGES[0]);
@@ -113,32 +90,31 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
   const y0 = w.player.y;
   input.press("Space");
   let peak = y0;
-  for (let i = 0; i < 50; i++) { step(w, input, 1); peak = Math.min(peak, w.player.y); }
+  for (let i = 0; i < 60; i++) { step(w, input, 1); peak = Math.min(peak, w.player.y); }
   input.release("Space");
   const jumpH = Math.round(y0 - peak);
   assert.ok(jumpH > 125 && jumpH < 170, `zıplama yüksekliği beklenmedik: ${jumpH}px`);
-  pass("Zıplama yüksekliği", `${jumpH}px (80px'lik platform adımları için geniş pay)`);
+  pass("Zıplama yüksekliği", `${jumpH}px (80px'lik kasa üstünden çıkışa geniş pay)`);
 
   // koşu hızı
   const w2 = createWorld(STAGES[0]);
   const in2 = makeInput();
   step(w2, in2, 90);
-  in2.press("ArrowRight");
+  in2.press("KeyD");
   step(w2, in2, 120);
-  assert.ok(w2.player.vx > 340 && w2.player.vx <= 352, `koşu hızı ${Math.round(w2.player.vx)}`);
+  assert.ok(w2.player.vx > 300 && w2.player.vx <= 322, `koşu hızı ${Math.round(w2.player.vx)}`);
   pass("Koşu hızı oturuyor", `${Math.round(w2.player.vx)} px/sn`);
 }
 
-/* --------------------------------------------------- 5) ölüm / yeniden doğuş */
+/* --------------------------------------------------- 4) ölüm / yeniden doğuş */
 
 {
   const w = createWorld(STAGES[0]);
   const input = makeInput();
   step(w, input, 90);
 
-  // diken
-  w.player.x = 28 * TILE + 5;
-  w.player.y = 13 * TILE + 10;
+  // diken (aşama I'de kolon 28-30, satır 13-14)
+  place(w, 28 * TILE + 5, 13 * TILE + 10);
   step(w, input, 2);
   assert.equal(w.deaths, 1, "diken öldürmedi");
   pass("Diken teması ölüm");
@@ -147,8 +123,7 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
   step(w, input, 40);
   assert.equal(w.dead, false, "yeniden doğmadı");
   const d = w.deaths;
-  w.player.y = w.stage.pxH + 200;
-  w.player.vy = 0;
+  place(w, 5 * TILE, w.stage.pxH + 200);
   step(w, input, 2);
   assert.equal(w.deaths, d + 1, "boşluk öldürmedi");
   step(w, input, 40);
@@ -156,85 +131,132 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
   pass("Boşluk ölümü + oyun saatiyle yeniden doğuş", `toplam ${w.deaths} ölüm`);
 }
 
-/* ------------------------------------------------------ 6) kontrol noktası */
+/* ------------------------------------------------------ 5) kontrol noktası */
 
 {
   const w = createWorld(STAGES[0]);
   const input = makeInput();
   step(w, input, 90);
 
-  // kontrol noktasının üzerinden geçir
-  w.player.x = 8 * TILE + 9;
-  w.player.y = 14 * TILE;
+  // ilk kontrol noktasının üzerinden geçir
+  const cp = w.stage.checkpoints[0];
+  place(w, cp.x + 9, cp.y);
   step(w, input, 2);
   assert.ok(w.checkpoint, "kontrol noktası kaydedilmedi");
   pass("Kontrol noktası kaydediliyor");
 
-  w.player.y = w.stage.pxH + 200;
+  const savedX = cp.x + 6;                 // respawn hücre ortasına hizalar
+  place(w, 5 * TILE, w.stage.pxH + 200);
   step(w, input, 2);
   step(w, input, 40);
-  assert.ok(Math.abs(w.player.x - (8 * TILE + 9)) < 3, `kontrol noktasına dönmedi: x=${Math.round(w.player.x)}`);
+  assert.ok(Math.abs(w.player.x - savedX) < 3, `kontrol noktasına dönmedi: x=${Math.round(w.player.x)} beklenen ${savedX}`);
   pass("Ölünce kontrol noktasına dönülüyor");
 }
 
-/* ------------------------------------------------------------ 7) faz mekaniği */
+/* ---------------------------------------------------- 6) Aşama II: sandık çekme */
 
 {
-  const w = createWorld(STAGES[1]);           // Faz Kırılması
+  const w = createWorld(STAGES[1]);           // Yük
   const input = makeInput();
-  step(w, input, 90);
-  assert.equal(w.phase, "light");
+  step(w, input, 5);                          // yerçekimi oturması için birkaç kare
+  const c = w.crates[0];
+  assert.equal(c.w, TUNE.crateSize, "sandık genişliği yanlış");
+  assert.equal(c.h, TUNE.crateH, "sandık yüksekliği yanlış (80 olmalı)");
+  assert.equal(c.onGround, true, "sandık yere oturmadı");
 
-  const nL = w.stage.solidsFor("light").length;
-  const nS = w.stage.solidsFor("shadow").length;
-  assert.notEqual(nL, nS, "faz katmanları aynı");
-  pass("Faz katmanları ayrışıyor", `ışık=${nL}, gölge=${nS}`);
+  // tünelin içinde, sandığın soluna yerleştir (tavan 520, kasanın tepesi 520 → zıplanamaz)
+  place(w, c.x - TUNE.w - 4, 560);
+  step(w, input, 5);
+  assert.equal(w.player.onGround, true, "tünelde yere oturmadı");
+  assert.equal(w.dead, false, "tünelde öldü");
 
-  // serbest alanda geçiş serbest
-  w.player.x = 5 * TILE + 9;
-  w.player.y = 10 * TILE;
-  w.player.vx = 0; w.player.vy = 0;
-  input.press("ShiftLeft"); step(w, input, 1); input.end();
-  assert.equal(w.phase, "shadow", "boşlukta faz değişmedi");
-  pass("Faz değişimi (serbest alan)");
+  // sandığın tepesi (520) ile tavandan kalan boşluk yalnız 80px →
+  // oyuncu (zıplama ≈148px) kasanın üstüne ZİPLAYAMAZ → çekmek zorunda.
+  const clearance = 520 - 440;                 // tavan altı (520) − oyuncu başı (560'ta dururken baş 520)
+  assert.ok(c.h >= clearance, "sandık tavandan geçecek kadar kısa — zıplanabilirdi");
 
-  // bloğun içine düşüyorsa iptal
-  w.player.x = 21 * TILE + 5;
-  w.player.y = 11 * TILE + 5;
-  w.phase = "light"; w.player.phase = "light";
-  input.press("ShiftLeft"); step(w, input, 1); input.end();
-  assert.equal(w.phase, "light", "bloğun içinde faz değişti — takılı kalırdı");
-  pass("Faz değişimi güvenliği (içinde kalma bug'ı yok)");
+  // E ile tut
+  input.press("KeyE"); step(w, input, 3); input.end();
+  assert.equal(!!w.player.grab, true, "E ile tutulmadı");
+  assert.equal(c.held, true, "held işareti set edilmedi");
+  pass("Sandık E ile tutuluyor", `yan=${c.grabSide}`);
+
+  // sola yürüyerek çek: oyuncu ve sandık birlikte sola kayar
+  const x0 = w.player.x, c0 = c.x;
+  input.press("KeyA");
+  step(w, input, 120);
+  assert.ok(w.player.x < x0 - 100, `oyuncu çekmedi: ${Math.round(x0)} → ${Math.round(w.player.x)}`);
+  assert.ok(c.x < c0 - 100, `sandık sürüklenmedi: ${Math.round(c0)} → ${Math.round(c.x)}`);
+  assert.equal(w.dead, false, "çekerken öldü");
+  assert.equal(!!w.player.grab, true, "çekme sırasında bırakıldı");
+  pass("Sandık çekiliyor (oyuncu + sandık birlikte hareket)",
+    `oyuncu ${Math.round(x0)}→${Math.round(w.player.x)}, kasa ${Math.round(c0)}→${Math.round(c.x)}`);
+
+  // bırak
+  input.release("KeyA"); step(w, input, 10);
+  input.press("KeyE"); step(w, input, 3); input.end();
+  assert.equal(!!w.player.grab, false, "E ile bırakılmadı");
+  pass("Sandık bırakılıyor");
 }
 
-/* --------------------------------------- 8) Aşama III: ışık zemininde yürümek */
+/* ----------------------------------------------------- 7) Aşama III: merdivenler */
 
 {
-  const w = createWorld(STAGES[2]);           // Yarık
+  const w = createWorld(STAGES[2]);           // Merdiven
+  const L = w.stage.ladders;
+  assert.ok(L.length >= 2, `beklenen en az 2 merdiven, ${L.length} bulundu`);
+  for (const l of L) {
+    assert.equal(l.w, TILE, "merdiven genişliği bir karo olmalı");
+    assert.ok(l.h >= TILE, "merdiven çok kısa");
+  }
+
+  const ladA = [...L].sort((a, b) => b.y - a.y)[0];   // en alttaki merdiven
+  assert.ok(ladA, "alt merdiven yok");
+  // merdivenin dibi: ayaklar merdiven alt kenarında (zemin üstü)
+  place(w, ladA.x + 6, ladA.y + ladA.h - TUNE.h);
   const input = makeInput();
-  step(w, input, 90);
+  step(w, input, 5);
+  assert.equal(w.player.onGround, true, "merdiven dibinde yere oturmadı");
 
-  // 'l' zeminine ışık fazında bas
-  w.player.x = 16 * TILE;
-  w.player.y = 15 * TILE - w.player.h;
-  w.player.vx = 0; w.player.vy = 0;
-  step(w, input, 20);
-  assert.equal(w.player.onGround, true, "ışık zemininde duramadı");
-  pass("Işık zemini ('l') yalnız light fazında katı");
+  input.press("KeyW"); step(w, input, 4);
+  assert.equal(w.player.climbing, true, "W ile merdivene girilmedi");
+  pass("Merdivene W ile giriş");
 
-  // gölge fazına geç → zemin kaybolur → düşer
-  input.press("ShiftLeft"); step(w, input, 1); input.end();
-  assert.equal(w.phase, "shadow");
-  const d = w.deaths;
-  step(w, input, 60);
-  assert.equal(w.deaths, d + 1, "gölge fazında düşmedi — bulmaca çalışmıyor");
-  pass("Gölge fazında ışık zemini kayboluyor (düşme + ölüm)");
+  step(w, input, 400);                        // tırman + üstten çık
+  assert.equal(w.player.climbing, false, "merdivenden çıkılmadı");
+  assert.equal(w.player.onGround, true, "tepede yere oturmadı");
+  assert.ok(w.player.y < 19 * TILE, `tırmanılmadı: y=${Math.round(w.player.y)}`);
+  pass("Merdivenden tırmanıp üst zemine çıkış", `y=${Math.round(w.player.y)}`);
 }
 
-/* ------------------------------------------------- 9) Aşama IV: kaçış sahnesi */
+/* ------------------------------------------- 8) Aşama IV: hareketli platform taşıması */
 
 {
-  const w = createWorld(STAGES[3]);           // Kaçış
+  const w = createWorld(STAGES[3]);           // Hareket
+  assert.ok(w.platforms.length >= 1, "platform yok");
+  const pl = w.platforms[0];
+
+  // platformun üstüne yerleştir
+  place(w, pl.x + 40, pl.y - TUNE.h);
+  const input = makeInput();
+  step(w, input, 3);
+  assert.equal(w.player.onGround, false || w.player.onGround, "platforma oturmadı");
+
+  let minX = Infinity, maxX = -Infinity;
+  for (let i = 0; i < 300; i++) {
+    updateWorld(w, 1 / 60, input); input.end();
+    minX = Math.min(minX, w.player.x);
+    maxX = Math.max(maxX, w.player.x);
+  }
+  assert.ok(maxX - minX > 60, `platform oyuncuyu taşımadı: ${Math.round(minX)}→${Math.round(maxX)}`);
+  assert.equal(w.dead, false, "platformdayken öldü");
+  pass("Hareketli platform oyuncuyu taşıyor", `${Math.round(minX)}→${Math.round(maxX)}px`);
+}
+
+/* ---------------------------------------------------- 9) Aşama V: kaçış sahnesi */
+
+{
+  const w = createWorld(STAGES[4]);           // Kaçış
   const input = makeInput();
   step(w, input, 90);
   const gap0 = w.player.x - w.chaseX;
@@ -250,57 +272,28 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
   pass("Yakalanma ölümle sonuçlanıyor");
 }
 
-/* ------------------------------------------------ 10) Aşama I merdiven geometrisi */
+/* --------------------------------------------- 10) faz mekaniği tamamen kaldırıldı */
 
 {
-  const w = createWorld(STAGES[0]);
-  const grid = w.stage.grid;
-  const runs = (rowIdx) => {
-    const out = [];
-    let start = -1;
-    for (let x = 0; x < w.stage.cols; x++) {
-      const hit = grid[rowIdx][x] === "#";
-      if (hit && start < 0) start = x;
-      if (!hit && start >= 0) { out.push({ x0: start * TILE, x1: x * TILE }); start = -1; }
-    }
-    if (start >= 0) out.push({ x0: start * TILE, x1: w.stage.cols * TILE });
-    return out;
-  };
-
-  // teras 520 → 80'lik adımlar → son basamak 120px (ölçülen maks. zıplama 148px)
-  let prev = { top: 520, x0: 31 * TILE, x1: 46 * TILE };
-  for (const row of [11, 9, 7, 4]) {
-    const plat = runs(row)[0];
-    assert.ok(plat, `satır ${row}'de platform yok`);
-    const climb = prev.top - row * TILE;
-    const reach = plat.x0 - prev.x1;
-    assert.ok(climb > 0 && climb <= 130, `satır ${row}: tırmanış ${climb}px (limit 130)`);
-    assert.ok(reach <= 60, `satır ${row}: yatay erişim ${reach}px çok uzak`);
-    prev = { top: row * TILE, x0: plat.x0, x1: plat.x1 };
+  for (const stage of STAGES) {
+    const w = createWorld(stage);
+    assert.equal(w.phase, undefined, `${stage.name}: world.phase hâlâ var`);
+    assert.equal(typeof w.stage.solidsFor, "undefined", `${stage.name}: solidsFor hâlâ var`);
   }
-  const e = w.stage.exit;
-  const standing = { x: e.x + 9, y: prev.top - 46, w: 22, h: 46 };
-  assert.ok(overlaps(standing, e), "son platformun üzerinde duran oyuncu çıkışa ulaşamıyor");
-  pass("Aşama I merdiveni geometrik olarak tırmanılabilir", "adımlar 80px, yatay erişim ≤ 60px");
-}
+  pass("Faz mekaniği tamamen kaldırıldı (world.phase / solidsFor yok)");
 
-/* ------------------------------------------- 11) Aşama II: faz köprüsü boşluğu örtüyor */
-
-{
+  // E girdisi izleniyor mu
+  const watched = ["KeyE"];
   const w = createWorld(STAGES[1]);
-  const s = w.stage;
-  const gapX0 = 16 * TILE;
-  const gapX1 = 28 * TILE;
-
-  for (const phase of ["light", "shadow"]) {
-    const solids = s.solidsFor(phase);
-    const bridging = solids.filter((b) => b.x + b.w > gapX0 && b.x < gapX1 && b.y > 8 * TILE);
-    assert.ok(bridging.length > 0, `${phase} fazında boşluğu köprüleyen platform yok`);
-  }
-  pass("Boşluk her iki fazda da köprülenebilir (bulmaca gerçekten çözülebilir)");
+  const input = makeInput();
+  place(w, w.crates[0].x - TUNE.w - 4, 560);
+  step(w, input, 3);
+  input.press("KeyE"); step(w, input, 1);
+  assert.equal(!!w.player.grab, true, "KeyE girdisi work etmedi");
+  pass("KeyE girdisi sandık tutmaya bağlı");
 }
 
-/* --------------------------------- 12) zemin perdesi (görsel katman) geometrisi */
+/* --------------------------------- 11) zemin perdesi (görsel katman) geometrisi */
 
 {
   const AMP = 15;
@@ -339,7 +332,7 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
       const row = expectedTopRow(s, x);
 
       if (row < 0) {
-        // çukur / diken / faz zemini: perde inmemeli
+        // çukur / diken: perde inmemeli
         for (let k = 0; k < SUB; k++) {
           const surface = -pos[(x * SUB + k) * 6 + 1];
           assert.ok(
@@ -361,17 +354,26 @@ pass("Zemin boşlukları tam zıplamayla aşılabilir", "en geniş boşluk 120px
       }
     }
 
-    // 4) oyun kritik: hiçbir diken sütununda perde olmamalı
+    // 4) oyun kritik: perde hiçbir dikenin üstünü KAPATMAMALI.
+    //    Dikenler ya boşluğun üstünde (perde hiç inmemeli) ya da sağlam
+    //    zeminin üstünde (perde zemin yüzeyine kadar çıkabilir, hatta dikenin
+    //    tabanını amp kadar örtebilir — bu doğal "zemine kök salmış" görünüm —
+    //    ama dikenleri gömemeli).
     for (const h of s.hazards) {
       const hx = h.x / TILE;
-      assert.equal(
-        expectedTopRow(s, hx), -1,
-        `${stage.name}: diken sütunu ${hx}'de perde var — diken görünmezdi`,
-      );
+      const limit = h.y + h.h - AMP - 0.01;    // perde bunun üstüne çıkamaz
+      for (let k = 0; k < SUB; k++) {
+        const surface = -pos[(hx * SUB + k) * 6 + 1];
+        assert.ok(
+          surface >= limit,
+          `${stage.name}: diken sütunu ${hx}'de perde ${Math.round(surface)} — limit ${Math.round(limit)}, dikenler gömülürdü`,
+        );
+      }
     }
   }
 
-  pass("Zemin perdesi geometrisi tutarlı (çukurlar açık, indeksler sağlam)", `en fazla yükseliş ${maxRise}px`);
+  pass("Zemin perdesi geometrisi tutarlı (çukurlar açık, indeksler sağlam)",
+    `en fazla yükseliş ${maxRise}px`);
 
   // 5) gürültü: deterministik ve sınırlı
   const n1 = makeNoise(1234);

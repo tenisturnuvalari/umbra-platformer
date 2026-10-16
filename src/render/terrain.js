@@ -62,7 +62,7 @@ export function buildTerrainCurtain(stage, opts = {}) {
 
   // Sütun başına PERDE yüzeyi = en alttan yukarıya doğru bitişik '#' kütleşinin tepesi.
   //   • En alt hücre '# değilse' (çukur/diken/boşluk) → perde hiç inmez:
-  //     dikenler ve faz platformları açıkta kalır.
+  //     dikenler ve boşluklar açıkta kalır.
   //   • Uçan platformlar (arada '.' olan) hesaba katılmaz: perde yalnızca
   //     gerçekten zemin olan kütleyi örter.
   const topRow = new Int32Array(stage.cols).fill(-1);

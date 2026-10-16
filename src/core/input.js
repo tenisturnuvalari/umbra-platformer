@@ -7,7 +7,7 @@ export class Input {
     const watched = new Set([
       "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
       "Space", "KeyA", "KeyD", "KeyW", "KeyS",
-      "ShiftLeft", "ShiftRight", "KeyQ", "KeyR",
+      "KeyE", "KeyR",
     ]);
 
     window.addEventListener("keydown", (e) => {

@@ -139,19 +139,24 @@ export class GameAudio {
     src.stop(ctx.currentTime + dur + 0.1);
   }
 
-  jump()   { this.#tone("sine", 260, 620, 0.16, 0.16); this.#burst("bandpass", 900, 0.09, 0.06, 1.5); }
-  land()   { this.#burst("lowpass", 260, 0.12, 0.2); this.#tone("sine", 130, 70, 0.1, 0.1); }
-  step()   { this.#burst("bandpass", 1700, 0.045, 0.035, 2.2); }
+  // Zıplama: kısa, alçak, yumuşak bir "hup" — yükselen sine değil (zırlama yok).
+  jump()   { this.#tone("sine", 200, 300, 0.09, 0.11); this.#burst("bandpass", 700, 0.06, 0.04, 1.2); }
+  land()   { this.#burst("lowpass", 240, 0.11, 0.18); this.#tone("sine", 120, 66, 0.09, 0.09); }
+  step()   { this.#burst("bandpass", 1700, 0.045, 0.03, 2.2); }
 
-  phase() {
-    this.#tone("triangle", 340, 980, 0.22, 0.12);
-    this.#burst("highpass", 2600, 0.22, 0.07, 0.8);
-  }
-  deny()   { this.#tone("square", 150, 90, 0.13, 0.07); }
+  // Sandık: ahşap tokmak (tut/bırak) + sürüklenme sürtünmesi
+  grab()     { this.#tone("triangle", 190, 150, 0.07, 0.1); this.#burst("bandpass", 520, 0.05, 0.05, 1.4); }
+  grabOff()  { this.#tone("triangle", 150, 120, 0.06, 0.07); }
+  crateDrag(){ this.#burst("lowpass", 380, 0.09, 0.05, 0.8); }
 
+  // Merdiven: yumuşak tık/çıkıntı
+  ladder()   { this.#tone("sine", 320, 360, 0.06, 0.06); }
+  climbStep(){ this.#burst("bandpass", 1200, 0.04, 0.03, 2.0); }
+
+  // Ölüm: alçak, boğuk bir çakılış — uzun düşen sawtooth değil (zırlama yok).
   death() {
-    this.#tone("sawtooth", 420, 48, 0.6, 0.15);
-    this.#burst("lowpass", 420, 0.5, 0.22);
+    this.#tone("sine", 170, 55, 0.22, 0.13);
+    this.#burst("lowpass", 360, 0.32, 0.2);
   }
 
   checkpoint() {

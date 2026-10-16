@@ -10,7 +10,6 @@ const el = {
   hud: document.getElementById("hud"),
   title: document.querySelector("#stage-title b"),
   sub: document.getElementById("stage-sub"),
-  phase: document.getElementById("phase"),
   hint: document.getElementById("hint"),
   deaths: document.getElementById("deaths"),
   sound: document.getElementById("sound"),
@@ -51,8 +50,6 @@ function updateHud() {
   const def = STAGES[index];
   el.title.textContent = def.name;
   el.sub.textContent = def.sub;
-  el.phase.dataset.phase = world.phase;
-  el.phase.textContent = world.phase === "light" ? "Faz · Işık" : "Faz · Gölge";
   el.deaths.textContent = `${totalDeaths} ölüm`;
 }
 
@@ -76,8 +73,10 @@ function handleEvents(events) {
       case "jump": audio.jump(); break;
       case "land": audio.land(); break;
       case "step": audio.step(); break;
-      case "phase": audio.phase(); updateHud(); break;
-      case "deny": audio.deny(); break;
+      case "grab": audio.grab(); break;
+      case "grabOff": audio.grabOff(); break;
+      case "ladderOn": audio.ladder(); break;
+      case "climbStep": audio.climbStep(); break;
       case "checkpoint": audio.checkpoint(); break;
       case "death":
         totalDeaths += 1;
@@ -105,7 +104,7 @@ function nextStage() {
     el.title.textContent = "Demo sonu";
     el.sub.textContent = "UMBRA";
     el.hint.textContent =
-      "Dört aşama tamamlandı · R ile baştan başla · Yeni aşamalar için repo'ya bak";
+      "Beş aşama tamamlandı · R ile baştan başla · Yeni aşamalar için repo'ya bak";
   }
 }
 
@@ -124,12 +123,9 @@ function frame(now) {
       handleEvents(updateWorld(world, dt, input));
     }
 
-    // ipucu metni (faz değişimi reddedildiyse geçici uyarı)
+    // ipucu metni
     if (!finished) {
-      el.hint.textContent = world.denyIn > 0
-        ? "Burada faz değiştirilemez — bloğun içine girerdin."
-        : STAGES[index].hint;
-      if (el.phase.dataset.phase !== world.phase) updateHud();
+      el.hint.textContent = STAGES[index].hint;
     }
 
     scene.sync(world, dt);
