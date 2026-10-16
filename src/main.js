@@ -122,6 +122,7 @@ function frame(now) {
       world.view.h = scene.height;
       handleEvents(updateWorld(world, dt, input));
     }
+    input.endFrame();               // "bu karede yeni basılanlar" (edge) temizlenir — yoksa hit() hep true kalır
 
     // ipucu metni
     if (!finished) {
