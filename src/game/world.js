@@ -8,7 +8,7 @@
  *   - merdiven tırmanma (W/S veya ↑/↓ ile in-çık, SPACE ile atla)
  *   - kutu İTME (yürüyerek) ve ÇEKME (E ile tut, geri yürü)
  *   - hareketli platformlar (oyuncuyu ve kutuları taşır)
- *   - arkadan gelen avcı (kaçış aşaması)
+ *   - arkadan gelen avcı (kaçış bölümü)
  *
  * Harita sözdizimi:
  *   # katı   ^ diken   P başlangıç   E çıkış   C kontrol noktası
@@ -124,6 +124,7 @@ export function createWorld(def, view = { w: 1280, h: 720 }) {
     def,
     view,
     chase: !!def.chase,
+    chaseFrom: def.chaseFrom != null ? def.chaseFrom * TILE : null,
 
     player: null,
     cam: { x: 0, y: 0 },
@@ -271,7 +272,16 @@ function standingOn(b, pl) {
 function carry(w) {
   const need = w.platforms.some((p) => p.dx !== 0 || p.dy !== 0);
   if (!need) return;
-  const st = w.stage.sets.solid;
+  // hareketli platform çevresindeki statikleri al (geniş harita perf)
+  const scratch = w.cScratch;
+  scratch.length = 0;
+  let x0 = w.player.x - NEAR_PAD, x1 = w.player.x + w.player.w + NEAR_PAD;
+  for (const pl of w.platforms) {
+    if (pl.x - NEAR_PAD < x0) x0 = pl.x - NEAR_PAD;
+    if (pl.x + pl.w + NEAR_PAD > x1) x1 = pl.x + pl.w + NEAR_PAD;
+  }
+  pushNearbyStatics(scratch, w.stage.sets.solid, x0, x1);
+  const st = scratch;
 
   const move = (b) => {
     for (const pl of w.platforms) {
@@ -290,11 +300,25 @@ function carry(w) {
 
 /* -------------------------------------------------------------------- kutular */
 
+// Geniş (kesintisiz) haritada binlerce statik solid olur; sweep bunları her alt
+// adımda gezer. Oyuncu/kutu yalnızca çevresindeki solidlerle etkileşir — bu
+// yüzden listeyi cismin etrafına daraltırız (dış mekânı güvenle atlarız).
+const NEAR_PAD = 460; // px — bir karede alınabilecek yolun (~6px) çok üzerinde
+
+function pushNearbyStatics(out, st, x0, x1) {
+  for (let i = 0; i < st.length; i++) {
+    const s = st[i];
+    if (s.x + s.w <= x0 || s.x >= x1) continue;
+    out.push(s);
+  }
+}
+
 function rebuildSolids(w) {
   const out = w.pSolids;
   out.length = 0;
-  const st = w.stage.sets.solid;
-  for (let i = 0; i < st.length; i++) out.push(st[i]);
+  const p = w.player;
+  const x0 = p.x - NEAR_PAD, x1 = p.x + p.w + NEAR_PAD;
+  pushNearbyStatics(out, w.stage.sets.solid, x0, x1);
   for (let i = 0; i < w.platforms.length; i++) out.push(w.platforms[i]);
   for (let i = 0; i < w.crates.length; i++) out.push(w.crates[i]);
   return out;
@@ -302,8 +326,8 @@ function rebuildSolids(w) {
 
 function crateSolids(w, self, out) {
   out.length = 0;
-  const st = w.stage.sets.solid;
-  for (let i = 0; i < st.length; i++) out.push(st[i]);
+  const x0 = self.x - NEAR_PAD, x1 = self.x + self.w + NEAR_PAD;
+  pushNearbyStatics(out, w.stage.sets.solid, x0, x1);
   for (let i = 0; i < w.platforms.length; i++) out.push(w.platforms[i]);
   for (let i = 0; i < w.crates.length; i++) {
     const c = w.crates[i];
@@ -714,7 +738,13 @@ function updatePlayer(w, dt, input) {
 }
 
 function updateChase(w, dt) {
-  if (!w.chase || w.dead) return;
+  if (w.dead) return;
+  if (!w.chase && w.chaseFrom != null && w.player.x >= w.chaseFrom) {
+    w.chase = true;
+    w.chaseX = w.player.x - 620;
+    w.chaseY = w.player.y + w.player.h;
+  }
+  if (!w.chase) return;
   const p = w.player;
   const speed = TUNE.run * 0.7 + Math.sin(_now / 900) * 24;
   w.chaseX = Math.min(w.chaseX + speed * dt, p.x - 40);
@@ -750,7 +780,7 @@ export function updateWorld(w, dt, input) {
   return w.events;
 }
 
-/** Render katmanı için: aşamanın bitip bitmediğini evaluate eder. */
+/** Render katmanı için: dünyanın bitip bitmediğini (çıkış) evaluate eder. */
 export function consumeExit(w) {
   const i = w.events.findIndex((e) => e.type === "exit");
   if (i < 0) return false;

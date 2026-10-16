@@ -145,7 +145,17 @@ export class StageScene {
 
     const amb = world.def.ambience;
     const stage = world.stage;
-    this.ambience = amb;
+    // ambience bir kopya: bölümler geçerken bu canlı nesneyi yumuşakça güncelleriz
+    this.ambience = { ...amb };
+    this.ambTarget = this.ambience;
+    this._fogCol = new THREE.Color(amb.fog);
+    this._tmpCol = new THREE.Color();
+    this._fogD = amb.fogDensity;
+    this._moonI = amb.moonI;
+    this._bloom = amb.bloom;
+    this._rain = amb.rain;
+    this._wind = amb.wind;
+    this._lightning = amb.lightning;
 
     this.scene.fog = new THREE.FogExp2(amb.fog, amb.fogDensity);
     this.scene.background = new THREE.Color(amb.fog);
@@ -410,12 +420,11 @@ export class StageScene {
     this.player = new Character(amb.rim);
     this.scene.add(this.player.root);
 
-    if (world.chase) {
-      this.creature = new Creature(0xff6a5a);
-      this.scene.add(this.creature.root);
-    } else {
-      this.creature = null;
-    }
+    // avcı her zaman kurulsun; kesintisiz dünyada av Bölüm V'de (chaseFrom)
+    // sonradan aktifleşir → görünürlüğü sync() içinde world.chase'e göre açılır.
+    this.creature = new Creature(0xff6a5a);
+    this.scene.add(this.creature.root);
+    this.creature.root.visible = false;
 
     this.spotMix = 1;
   }
@@ -486,9 +495,41 @@ export class StageScene {
 
   /* --------------------------------------------------------------- animasyon */
 
+  /* ------------------------------------------------------ ambiyan geçişi (bölüm) */
+
+  // main.js her bölüm değişiminde çağırır; sync içinde yumuşakça uygulanır.
+  aimAmbience(amb) { if (amb) this.ambTarget = amb; }
+
+  _blendAmbience(dt) {
+    const T = this.ambTarget;
+    if (!T || !this._fogCol) return;
+    const k = Math.min(1, dt * 1.7);          // ~0.6 sn'lik geçiş
+    this._fogCol.lerp(this._tmpCol.setHex(T.fog), k);
+    this._fogD += (T.fogDensity - this._fogD) * k;
+    this._moonI += (T.moonI - this._moonI) * k;
+    this._bloom += (T.bloom - this._bloom) * k;
+    this._rain += (T.rain - this._rain) * k;
+    this._wind += (T.wind - this._wind) * k;
+    this._lightning = T.lightning;
+    // uygula
+    this.scene.fog.color.copy(this._fogCol);
+    this.scene.fog.density = this._fogD;
+    if (this.scene.background?.isColor) this.scene.background.copy(this._fogCol);
+    this.moonBase = this._moonI;
+    if (this.bloomPass) this.bloomPass.strength = this._bloom;
+    if (this.rain) { this.rain.material.opacity = 0.16 + this._rain * 0.3; this.rainIntensity = this._rain; }
+    if (this.ambience) {
+      this.ambience.lightning = this._lightning;
+      this.ambience.wind = this._wind;
+      this.ambience.rain = this._rain;
+      this.ambience.moonDir = T.moonDir;
+    }
+  }
+
   sync(world, dt) {
     const amb = this.ambience;
     const p = world.player;
+    this._blendAmbience(dt);
 
     // --- kamera
     // Mesafe, FOV'dan türetilir: ekranda tam olarak view.w × view.h dünya
@@ -574,11 +615,14 @@ export class StageScene {
     if (this._wasAir && !air) this.player.land();
     this._wasAir = air;
 
-    // --- avcı
-    if (this.creature && world.chase) {
-      this.creature.root.position.set(world.chaseX, -(world.chaseY ?? 0) - 2, -26);
-      this.creature.root.scale.x = 1;
-      this.creature.pose(dt, 300);
+    // --- avcı (yalnızca av başlayınca görünür ve canlanır)
+    if (this.creature) {
+      this.creature.root.visible = world.chase;
+      if (world.chase) {
+        this.creature.root.position.set(world.chaseX, -(world.chaseY ?? 0) - 2, -26);
+        this.creature.root.scale.x = 1;
+        this.creature.pose(dt, 300);
+      }
     }
 
     // --- çıkış nabzı

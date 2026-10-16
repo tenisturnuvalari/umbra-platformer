@@ -1,8 +1,10 @@
-import { STAGES } from "./levels/index.js";
+import { WORLD, SECTIONS } from "./levels/index.js";
 import { createWorld, updateWorld, respawn } from "./game/world.js";
 import { Input } from "./core/input.js";
 import { GameAudio } from "./core/audio.js";
 import { StageScene } from "./render/scene.js";
+
+const TILE = 40;
 
 const el = {
   boot: document.getElementById("boot"),
@@ -32,13 +34,13 @@ const input = new Input();
 const audio = new GameAudio();
 
 // bloom + derinlik alanı; başarısız olursa sahne düz render ile çalışır
-await scene.enablePost(STAGES[0].ambience.bloom);
+await scene.enablePost(WORLD.ambience.bloom);
 
-let index = 0;
 let world = null;
 let started = false;
 let totalDeaths = 0;
 let finished = false;
+let curSec = 0;          // içinde bulunulan bölüm (index)
 
 function flash(kind) {
   el.flash.classList.remove("hit", "death");
@@ -46,21 +48,39 @@ function flash(kind) {
   el.flash.classList.add(kind);
 }
 
-function updateHud() {
-  const def = STAGES[index];
-  el.title.textContent = def.name;
-  el.sub.textContent = def.sub;
+/* ------------------------------------------------------------- dünya yükleme */
+
+function loadWorld() {
+  finished = false;
+  curSec = 0;
+  world = createWorld(WORLD, { w: scene.width, h: scene.height });
+  scene.load(world);
+  scene.aimAmbience(SECTIONS[0].ambience);
+  setHudSection(0);
+}
+
+function setHudSection(i) {
+  const s = SECTIONS[i];
+  el.title.textContent = s.name;
+  el.sub.textContent = s.sub;
   el.deaths.textContent = `${totalDeaths} ölüm`;
 }
 
-function loadStage(i) {
-  index = i;
-  finished = false;
-  world = createWorld(STAGES[i], { w: scene.width, h: scene.height });
-  scene.load(world);
-  if (scene.bloomPass) scene.bloomPass.strength = STAGES[i].ambience.bloom;
-  audio.setAmbience({ rain: STAGES[i].ambience.rain, wind: STAGES[i].ambience.wind });
-  updateHud();
+// oyuncunun X konumuna göre bölüm → HUD başlığı + ambiyan geçişi (kesintisiz)
+function syncSection() {
+  const p = world.player;
+  const col = (p.x + p.w / 2) / TILE;
+  let i = SECTIONS.length - 1;
+  for (let k = 0; k < SECTIONS.length; k++) {
+    if (col < SECTIONS[k].to) { i = k; break; }
+  }
+  if (i !== curSec) {
+    curSec = i;
+    setHudSection(i);
+    scene.aimAmbience(SECTIONS[i].ambience);
+    const a = SECTIONS[i].ambience;
+    audio.setAmbience({ rain: a.rain, wind: a.wind });
+  }
 }
 
 scene.onLightning = () => audio.thunder(0.5 + Math.random() * 1.6);
@@ -85,27 +105,20 @@ function handleEvents(events) {
         scene.shake = 1.3;
         el.deaths.textContent = `${totalDeaths} ölüm`;
         break;
-      case "exit": nextStage(); break;
+      case "exit": finishGame(); break;
       default: break;
     }
   }
 }
 
-function nextStage() {
-  const next = index + 1;
-  if (next < STAGES.length) {
-    audio.exit();
-    flash("hit");
-    loadStage(next);
-  } else {
-    finished = true;
-    world.done = true;
-    audio.exit();
-    el.title.textContent = "Demo sonu";
-    el.sub.textContent = "UMBRA";
-    el.hint.textContent =
-      "Beş aşama tamamlandı · R ile baştan başla · Yeni aşamalar için repo'ya bak";
-  }
+function finishGame() {
+  finished = true;
+  world.done = true;
+  audio.exit();
+  el.title.textContent = "Demo sonu";
+  el.sub.textContent = "UMBRA";
+  el.hint.textContent =
+    "Kesintisiz dünya tamamlandı · R ile baştan başla · Yeni bölümler için repo'ya bak";
 }
 
 /* --------------------------------------------------------------- ana döngü */
@@ -121,13 +134,12 @@ function frame(now) {
       world.view.w = scene.width;
       world.view.h = scene.height;
       handleEvents(updateWorld(world, dt, input));
+      syncSection();               // X konumu → başlık + ambiyan
     }
     input.endFrame();               // "bu karede yeni basılanlar" (edge) temizlenir — yoksa hit() hep true kalır
 
-    // ipucu metni
-    if (!finished) {
-      el.hint.textContent = STAGES[index].hint;
-    }
+    // ipucu metni (içinde bulunulan bölüm)
+    if (!finished) el.hint.textContent = SECTIONS[curSec].hint;
 
     scene.sync(world, dt);
     scene.render();
@@ -155,15 +167,15 @@ el.sound.addEventListener("click", () => {
 
 el.restart.addEventListener("click", () => {
   if (!world) return;
-  if (finished) { loadStage(0); return; }
+  if (finished) { loadWorld(); return; }
   world.checkpoint = null;
   respawn(world);
-  updateHud();
+  setHudSection(curSec);
 });
 
 window.addEventListener("keydown", (e) => {
   if (e.code === "Enter" && !started) el.start.click();
 });
 
-loadStage(0);
+loadWorld();
 requestAnimationFrame(frame);
