@@ -1,220 +1,169 @@
-import { Application, Container, Graphics } from "pixi.js";
-
+import { STAGES } from "./levels/index.js";
+import { createWorld, updateWorld, respawn } from "./game/world.js";
 import { Input } from "./core/input.js";
-import { blocked, overlaps } from "./core/physics.js";
-import { LEVELS } from "./levels/index.js";
-import { parseLevel, buildLevelGraphics } from "./game/level.js";
-import { Camera } from "./game/camera.js";
-import {
-  TUNE,
-  createPlayer,
-  updatePlayer,
-  createPlayerGraphics,
-  paintAura,
-  syncPlayerGraphics,
-} from "./game/player.js";
+import { GameAudio } from "./core/audio.js";
+import { StageScene } from "./render/scene.js";
 
-/* ------------------------------------------------------------------ sahne */
-
-const app = new Application();
-await app.init({
-  resizeTo: window,
-  backgroundAlpha: 0,
-  antialias: true,
-  autoDensity: true,
-  resolution: Math.min(window.devicePixelRatio || 1, 2),
-});
-document.getElementById("game").appendChild(app.canvas);
-
-const far = new Container();   // paralaks: tepeler + sis
-const world = new Container(); // kameraya bağlı oyun dünyası
-app.stage.addChild(far, world);
-
-const hud = {
-  level: document.getElementById("level-name"),
+const el = {
+  boot: document.getElementById("boot"),
+  start: document.getElementById("start"),
+  hud: document.getElementById("hud"),
+  title: document.querySelector("#stage-title b"),
+  sub: document.getElementById("stage-sub"),
   phase: document.getElementById("phase"),
   hint: document.getElementById("hint"),
   deaths: document.getElementById("deaths"),
+  sound: document.getElementById("sound"),
+  restart: document.getElementById("restart"),
   flash: document.getElementById("flash"),
 };
 
+const container = document.getElementById("stage");
+
+let scene;
+try {
+  scene = new StageScene(container);
+} catch (err) {
+  el.boot.querySelector(".boot-inner").innerHTML =
+    "<h1>UMBRA</h1><p class='sub'>WebGL başlatılamadı — donanım hızlandırma kapalı olabilir.</p>";
+  throw err;
+}
+
 const input = new Input();
-const camera = new Camera();
+const audio = new GameAudio();
 
-const state = {
-  index: 0,
-  phase: "light",
-  deaths: 0,
-  dead: false,
-  done: false,
-  respawnAt: 0,
-};
+let index = 0;
+let world = null;
+let started = false;
+let totalDeaths = 0;
+let finished = false;
 
-let level = null;
-let player = null;
-let levelGfx = null;
-let playerGfx = null;
-let backdrop = null;
-
-/* ------------------------------------------------------------- arka plan */
-
-function makeBackdrop(index, pxW, pxH) {
-  const g = new Container();
-  const hills = new Graphics();
-  const fog = new Graphics();
-
-  let seed = 1337 + index * 977;
-  const rnd = () => {
-    seed = (seed * 1664525 + 1013904223) % 4294967296;
-    return seed / 4294967296;
-  };
-
-  // uzak tepe silüetleri (paralaks 0.35)
-  const base = pxH * 0.72;
-  for (let layer = 0; layer < 2; layer++) {
-    const tone = layer === 0 ? 0x12161b : 0x0c0f13;
-    const amp = 90 - layer * 25;
-    const y0 = base - layer * 40;
-    const pts = [-200, pxH + 100, -200, y0];
-    for (let x = -200; x <= pxW + 200; x += 90) {
-      pts.push(x, y0 - rnd() * amp);
-    }
-    pts.push(pxW + 200, pxH + 100);
-    hills.poly(pts).fill(tone);
-  }
-
-  // sis küteleri (paralaks 0.55)
-  for (let i = 0; i < 9; i++) {
-    fog.circle(rnd() * pxW, pxH * (0.35 + rnd() * 0.5), 90 + rnd() * 190)
-      .fill({ color: 0xdfe6ee, alpha: 0.02 + rnd() * 0.03 });
-  }
-
-  g.addChild(hills, fog);
-  return g;
+function flash(kind) {
+  el.flash.classList.remove("hit", "death");
+  void el.flash.offsetWidth;          // animasyonu yeniden tetikle
+  el.flash.classList.add(kind);
 }
 
-/* ---------------------------------------------------------------- seviye */
-
-function loadLevel(i) {
-  state.index = i;
-
-  if (levelGfx) { world.removeChild(levelGfx.root); levelGfx.root.destroy({ children: true }); }
-  if (playerGfx) { world.removeChild(playerGfx.root); playerGfx.root.destroy({ children: true }); }
-  if (backdrop) { far.removeChild(backdrop); backdrop.destroy({ children: true }); }
-
-  level = parseLevel(LEVELS[i]);
-  levelGfx = buildLevelGraphics(level);
-  world.addChild(levelGfx.root);
-
-  backdrop = makeBackdrop(i, level.pxW, level.pxH);
-  far.addChild(backdrop);
-
-  player = createPlayer(level.spawn, level.startPhase);
-  playerGfx = createPlayerGraphics(player);
-  world.addChild(playerGfx.root);
-
-  state.phase = level.startPhase;
-  state.dead = false;
-  state.done = false;
-
-  applyPhase();
-  sync();
-  camera.snap(player, level, app.screen);
-
-  hud.level.textContent = LEVELS[i].name;
-  hud.hint.textContent = LEVELS[i].hint;
-  updateDeaths();
+function updateHud() {
+  const def = STAGES[index];
+  el.title.textContent = def.name;
+  el.sub.textContent = def.sub;
+  el.phase.dataset.phase = world.phase;
+  el.phase.textContent = world.phase === "light" ? "Faz · Işık" : "Faz · Gölge";
+  el.deaths.textContent = `${totalDeaths} ölüm`;
 }
 
-function respawn() {
-  player = createPlayer(level.spawn, level.startPhase);
-  state.phase = level.startPhase;
-  state.dead = false;
-  applyPhase();
-  sync();
-  camera.snap(player, level, app.screen);
+function loadStage(i) {
+  index = i;
+  finished = false;
+  world = createWorld(STAGES[i], { w: scene.width, h: scene.height });
+  scene.load(world);
+  if (scene.bloomPass) scene.bloomPass.strength = STAGES[i].ambience.bloom;
+  audio.setAmbience({ rain: STAGES[i].ambience.rain, wind: STAGES[i].ambience.wind });
+  updateHud();
 }
 
-function die() {
-  if (state.dead) return;
-  state.dead = true;
-  state.deaths += 1;
-  updateDeaths();
-  hud.flash.classList.add("on");
-  setTimeout(() => hud.flash.classList.remove("on"), 70);
-  setTimeout(respawn, 420);
-}
+scene.onLightning = () => audio.thunder(0.5 + Math.random() * 1.6);
 
-function updateDeaths() {
-  hud.deaths.textContent = `${state.deaths} ölüm`;
-}
+/* ------------------------------------------------------------------ olaylar */
 
-/* ------------------------------------------------------------------ faz */
-
-function applyPhase() {
-  const isLight = state.phase === "light";
-  levelGfx.gLight.alpha = isLight ? 1 : 0.16;
-  levelGfx.gShadow.alpha = isLight ? 0.16 : 1;
-  player.phase = state.phase;
-  paintAura(playerGfx, player);
-  hud.phase.dataset.phase = state.phase;
-  hud.phase.textContent = isLight ? "Faz · Işık" : "Faz · Gölge";
-}
-
-function tryTogglePhase() {
-  if (state.dead || state.done) return;
-  const next = state.phase === "light" ? "shadow" : "light";
-
-  // o an yeni faza ait bir bloğun içine giriyorsak geçiş iptal (içinde kalma bug'ı yok)
-  if (blocked(player, level.solidsFor(next))) {
-    hud.hint.textContent = "Burada faz değiştirilemez — bloğun içine girerdin.";
-    clearTimeout(tryTogglePhase._t);
-    tryTogglePhase._t = setTimeout(() => {
-      hud.hint.textContent = LEVELS[state.index].hint;
-    }, 1400);
-    return;
-  }
-
-  state.phase = next;
-  applyPhase();
-}
-
-/* ------------------------------------------------------------------ çizim */
-
-function sync() {
-  syncPlayerGraphics(player, playerGfx);
-}
-
-app.ticker.add((ticker) => {
-  const dt = Math.min(ticker.deltaMS, 50) / 1000;
-
-  if (input.hit("KeyR")) {
-    loadLevel(state.done ? 0 : state.index);
-  } else if (!state.dead && !state.done) {
-    if (input.hit("ShiftLeft", "ShiftRight", "KeyQ")) tryTogglePhase();
-
-    const events = updatePlayer(player, dt, input, level);
-    if (events.died) die();
-    else if (events.exited) {
-      const next = state.index + 1;
-      if (next < LEVELS.length) loadLevel(next);
-      else {
-        state.done = true;
-        hud.level.textContent = "Demo sonu";
-        hud.hint.textContent = "İki aşama tamamlandı. R ile başa dön — Aşama 3 (kaçış sahnesi) sıradaki commit'te.";
-      }
+function handleEvents(events) {
+  for (const e of events) {
+    switch (e.type) {
+      case "jump": audio.jump(); break;
+      case "land": audio.land(); break;
+      case "step": audio.step(); break;
+      case "phase": audio.phase(); updateHud(); break;
+      case "deny": audio.deny(); break;
+      case "checkpoint": audio.checkpoint(); break;
+      case "death":
+        totalDeaths += 1;
+        audio.death();
+        flash("death");
+        scene.shake = 1.3;
+        el.deaths.textContent = `${totalDeaths} ölüm`;
+        break;
+      case "exit": nextStage(); break;
+      default: break;
     }
   }
+}
 
-  sync();
-  camera.follow(player, level, app.screen, dt);
-  world.position.set(-camera.x, -camera.y);
-  far.position.set(-camera.x * 0.4, -camera.y * 0.55);
+function nextStage() {
+  const next = index + 1;
+  if (next < STAGES.length) {
+    audio.exit();
+    flash("hit");
+    loadStage(next);
+  } else {
+    finished = true;
+    world.done = true;
+    audio.exit();
+    el.title.textContent = "Demo sonu";
+    el.sub.textContent = "UMBRA";
+    el.hint.textContent =
+      "Dört aşama tamamlandı · R ile baştan başla · Yeni aşamalar için repo'ya bak";
+  }
+}
 
-  // çıkış nabzı
-  if (levelGfx) levelGfx.gExit.alpha = 0.65 + Math.sin(performance.now() / 320) * 0.35;
+/* --------------------------------------------------------------- ana döngü */
 
-  input.endFrame();
+let last = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+
+  if (world) {
+    if (started && !finished) {
+      world.view.w = scene.width;
+      world.view.h = scene.height;
+      handleEvents(updateWorld(world, dt, input));
+    }
+
+    // ipucu metni (faz değişimi reddedildiyse geçici uyarı)
+    if (!finished) {
+      el.hint.textContent = world.denyIn > 0
+        ? "Burada faz değiştirilemez — bloğun içine girerdin."
+        : STAGES[index].hint;
+      if (el.phase.dataset.phase !== world.phase) updateHud();
+    }
+
+    scene.sync(world, dt);
+    scene.render();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* ------------------------------------------------------------------- başlat */
+
+el.start.addEventListener("click", () => {
+  audio.init();
+  audio.resume();
+  started = true;
+  el.boot.classList.add("off");
+  el.hud.classList.add("on");
+  last = performance.now();
 });
 
-loadLevel(0);
+el.sound.addEventListener("click", () => {
+  audio.enabled = !audio.enabled;
+  audio.setMuted(!audio.enabled);
+  el.sound.textContent = audio.enabled ? "Ses · Açık" : "Ses · Kapalı";
+});
+
+el.restart.addEventListener("click", () => {
+  if (!world) return;
+  if (finished) { loadStage(0); return; }
+  world.checkpoint = null;
+  respawn(world);
+  updateHud();
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Enter" && !started) el.start.click();
+});
+
+loadStage(0);
+requestAnimationFrame(frame);

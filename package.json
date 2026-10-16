@@ -1,0 +1,12 @@
+{
+  "name": "umbra",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "UMBRA — faz mekanikli, sisli ve yağmurlu 2.5D gölge platformer (Three.js).",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/smoke.mjs",
+    "start": "npx --yes serve@14 ."
+  }
+}

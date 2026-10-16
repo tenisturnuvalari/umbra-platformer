@@ -1,74 +1,126 @@
-# UMBRA — gölge fazı platformer
+# UMBRA
 
-Limbo'nun hissini (karanlık silüetler, ağır fizik, kelimesiz anlatım) alıp **tamamen
-farklı bir oyun mekaniği** üzerine kurulan 2D platform oyunu.
+**Limbo'nun hissi, farklı bir mekaniğe sahip, sisli ve yağmurlu 2.5D gölge platformer.**
 
-> Limbo'nun asıl kodu kapalı kaynaklıdır; burada Playdead'in hiçbir varlığı
-> (grafik, ses, karakter) kullanılmıyor. Tüm görseller koddan üretiliyor.
+Oyun, oyun mantığı (fizik, bulmaca, aşamalar) ile görsel katman (Three.js) tamamen
+birbirinden ayrılmış iki katmandan oluşur. Bu sayede oyun mantığı tarayıcı olmadan
+Node'da test edilebilir — `test/smoke.mjs` bunu yapar ve 18 doğrulama içerir.
 
-## Ana fark: faz mekaniği
+> Limbo'nun (Playdead) asıl kodu kapalı kaynaklıdır; burada onların hiçbir varlığı
+> (grafik, ses, karakter) kullanılmıyor. Tüm görseller ve sesler kodla üretiliyor.
 
-Dünya iki üst üste binen katmandan oluşuyor:
+---
+
+## Mekanik: faz sistemi
+
+Dünya, üst üste binen iki fazdan oluşuyor:
 
 | İşaret | Anlamı |
 | ------ | ------ |
-| `#`    | Her fazda katı zemin (güvenli) |
-| `l`    | **Sadece Işık fazında** katı platform |
-| `s`    | **Sadece Gölge fazında** katı platform |
+| `#`    | **Her fazda katı** zemin — asla kaybolmaz |
+| `l`    | Yalnız **Işık** fazında katı platform |
+| `s`    | Yalnız **Gölge** fazında katı platform |
 | `^`    | Diken — her fazda ölüm |
 
-`SHIFT` ile faz değiştirirsin. Ayaklarının altındaki platform o an kaybolur;
-bu yüzden bulmaca "ne zaman değiştiririm" üzerine kurulu. Limbo'da böyle bir
-mekanik yok — orada ipler, kutular, su ve kibrit var.
+`SHIFT` ile faz değiştirirsin. Ayaklarının altındaki platform o an kaybolur; bu yüzden
+asıl bulmaca "ne zaman değiştiririm"dir.
 
-**Dizayn ilkesi:** zemin asla kaybolmaz, sadece *üzerinde durduğun platform*
-kaybolur. Böylece oyuncu hiçbir zaman haksız yere ölmez; her ölüm bir öğrenmedir.
+**Dizayn ilkesi:** zemin asla kaybolmaz, sadece *üzerinde durduğun platform* kaybolur.
+Oyuncu haksız yere ölmez; her ölüm bir öğrenmedir. Bloğun içine düşecekse geçiş otomatik
+iptal edilir (takılı kalma bug'ı yok).
+
+## Aşamalar
+
+| # | Aşama | Ne öğretir |
+| - | ----- | ---------- |
+| I | **Uyanış** | Hareket, zıplama, teras merdiveni, dikenler |
+| II | **Faz Kırılması** | Boşlukta faz değişimi, faz duvarı |
+| III | **Yarık** | Zeminin faza göre yok olması, şimşek, ağır yağmur |
+| IV | **Kaçış** | Arkandan gelen avcı — yakalanırsan ölürsün |
+
+Her aşamanın kendi ambiyansı var: sis yoğunluğu, yağmur şiddeti, ışık rengi, bloom.
 
 ## Kontroller
 
 | Tuş | Aksiyon |
 | --- | ------- |
-| `←` `→` / `A` `D` | Yürü |
-| `SPACE` / `W` / `↑` | Zıpla (basılı tut = daha yüksek) |
+| `A` `D` / `←` `→` | Yürü |
+| `SPACE` / `W` | Zıpla (basılı tut = daha yüksek) |
 | `SHIFT` / `Q` | Faz değiştir |
-| `R` | Aşamayı yeniden başlat |
+| `R` | Aşamayı baştan başlat |
+
+---
+
+## Teknik
+
+### Mimari
+
+```
+index.html              sahne, HUD, açılış perdesi (CSS: letterbox, grain, vinyet)
+src/main.js             olay döngüsü: world durumu → ses + görsel senkron
+src/game/world.js       OYUN MANTIĞI — render kütüphanesi import etmez
+src/core/physics.js     AABB süpürme fizigi (alt adımlı, tünellemeye karşı)
+src/core/audio.js       Prosedürel ses (WebAudio, sıfır ses dosyası)
+src/core/input.js       Klavye + kenar (edge) algılama
+src/render/scene.js     Three.js sahnesi: ışık, gölge haritası, sis, yağmur, bloom
+src/render/character.js Prosedürel 3D iskelet + animasyon + avcı figürü
+src/levels/index.js     Aşama verisi (harita + ambiyans)
+test/smoke.mjs          Kafaüstü duman testi (Node, render yok)
+```
+
+### Görsel katman
+
+- **Three.js r170**, perspektif kamera, hafif açılı bakış (derinlik hissi)
+- **Gerçek gölge haritası**: yön ışığı (2048², PCF yumuşak) + oyuncunun feneri (SpotLight, 1024²)
+- **FogExp2** +16 adet kayan sis kartı → hacimsel derinlik
+- **Yağmur**: `LineSegments` ile prosedürel çizgi parçacıkları, rüzgar sapması, kamerayı takip eden hacim
+- **Şimşek** (Aşama III): yön ışığı parlaması + gecikmeli gürültü patlaması
+- **Bloom** (UnrealBloomPass) — kurulamazsa sessizce düz render'a düşer
+- Bloklar `InstancedMesh` (sahne başına tek çizim çağrısı), üst kenarlarda ışık çizgisi
+- ACES tone mapping, sinematik letterbox, film grain, vinyet
+
+### Ses
+
+Sıfır ses dosyası; her şey WebAudio ile sentezleniyor: yağmur (brown gürültü + bant geçiren +
+LFO dalgalanma), rüzgar, zıplama, iniş, adım, faz geçişi, reddetme, ölüm, kontrol noktası
+zili, çıkış, şimşek gürültüsü.
+
+### Test
+
+```bash
+npm test        # node test/smoke.mjs
+```
+
+Doğrulananlar: harita bütünlüğü, doğuş/çıkış güvenliği, zemin boşluklarının geçilebilirliği,
+zıplama/koşu değerleri, ölüm + yeniden doğuş, kontrol noktaları, faz güvenliği, ışık zemininde
+düşme, avcının yakalaması, aşama I merdiven geometrisi, faz köprüsünün boşluğu örtmesi.
+
+**Test etmeyenler:** render/görsel kompozisyon, ses karışımı, FPS. Bunlar tarayıcıda sende.
+
+---
 
 ## Çalıştırma
 
-ES modülü kullandığı için `file://` ile **açılmaz**, bir sunucu gerekir:
+ES modülü + CDN kullanıldığı için `file://` ile açılmaz:
 
 ```bash
-npx serve .
+npm start          # npx serve
 # veya
 python -m http.server 8080
 ```
 
-GitHub Pages üzerinde doğrudan çalışır (build adımı yoktur — PixiJS CDN'den gelir).
-
-## Mimari
-
-```
-index.html            sahne, HUD, film grain + vinyet (CSS)
-src/main.js           oyun döngüsü, faz geçişi, seviye akışı
-src/core/physics.js   kendi AABB süpürme fizigimiz (PixiJS yalnızca çizer)
-src/core/input.js     klavye + edge detection
-src/game/level.js     ASCII harita → çarpışma kutuları + görsel
-src/game/player.js    oyuncu hissi (TUNE nesnesi) + silüet çizimi
-src/game/camera.js    yumuşak takip, ileri bakış, sınır kırpma
-src/levels/index.js   aşama verileri (düzenlemek için tek dosya)
-```
-
-`TUNE` nesnesi oyunun tüm "hissini" (koşu hızı, yerçekimi, coyote time, jump
-buffer) tek yerde toplar. Değiştirip yenilemen yeterli.
+GitHub Pages üzerinde build adımı olmadan çalışır.
 
 ## Yol haritası
 
-- [x] Aşama 1 · Uyanış — hareket, zıplama, kamera, ölüm/respawn
-- [x] Aşama 2 · Faz Kırılması — faz mekaniği, boşlukta faz değişimi
-- [ ] Aşama 3 · Yarık — taşınabilir ışık kaynağı, faz duvarı bulmacaları
-- [ ] Aşama 4 · Ağırlık — asılı platformlar, zamanlayıcılı kapılar
-- [ ] Aşama 5 · Kaçış — arkadan gelen karanlık, sabit kamera kesmeleri
-- [ ] Ses (CC0), checkpoint, mobil dokunmatik
+- [x] 3D sahne, gölge haritası, sis, yağmur, şimşek
+- [x] Prosedürel karakter iskeleti + animasyon
+- [x] 4 aşama (sonuncusu kaçış sahnesi)
+- [x] Prosedürel ses motoru
+- [ ] Kayıtlı müzik/ses (CC0 lisanslı, kaynak doğrulanmış)
+- [ ] Daha zengin figürler (rig'lenmiş glTF modelleri — harici asset gerekir)
+- [ ] Mobil dokunmatik kontroller
+- [ ] Bölüm seçimi ve kayıt
 
 ## Lisans
 

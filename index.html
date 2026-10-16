@@ -6,21 +6,20 @@
 <title>UMBRA — gölge fazı platformer</title>
 <style>
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; overflow: hidden; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #05070a; }
 
   body {
-    background: linear-gradient(180deg, #3a4148 0%, #1b2026 46%, #0a0c0f 100%);
     color: #e8ecf1;
-    font: 500 14px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+    font: 500 14px/1.5 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }
 
-  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #stage, #stage canvas { position: fixed; inset: 0; display: block; }
 
-  /* film grain — gorsel doku, oyun motoruna dokunmaz */
+  /* ---- sinematik katmanlar ---- */
   #grain {
-    position: fixed; inset: -60%; pointer-events: none; opacity: .15; z-index: 5;
+    position: fixed; inset: -60%; pointer-events: none; opacity: .13; z-index: 5;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>");
     animation: grain 1.1s steps(3) infinite;
   }
@@ -30,63 +29,123 @@
     66%  { transform: translate(1%, -2%); }
     100% { transform: translate(0, 0); }
   }
-
   #vignette {
     position: fixed; inset: 0; pointer-events: none; z-index: 6;
-    background: radial-gradient(ellipse at 50% 45%, transparent 34%, rgba(0,0,0,.74) 100%);
+    background: radial-gradient(ellipse at 50% 44%, transparent 32%, rgba(0,0,0,.78) 100%);
   }
+  #letterbox::before, #letterbox::after {
+    content: ""; position: fixed; left: 0; right: 0; height: 5.5vh; background: #000; z-index: 7;
+  }
+  #letterbox::before { top: 0; }
+  #letterbox::after { bottom: 0; }
 
+  #flash { position: fixed; inset: 0; z-index: 9; pointer-events: none; background: #dfe9ff; opacity: 0; }
+  #flash.hit { animation: flash .5s ease-out; }
+  @keyframes flash { 0% { opacity: .55; } 100% { opacity: 0; } }
+  #flash.death { background: #ff2b2b; animation: flash .45s ease-out; }
+
+  /* ---- HUD ---- */
   #hud {
-    position: fixed; inset: 0; z-index: 7; pointer-events: none;
-    padding: 18px 22px; display: flex; flex-direction: column; justify-content: space-between;
+    position: fixed; inset: 0; z-index: 8; pointer-events: none;
+    padding: calc(5.5vh + 16px) 26px; display: flex; flex-direction: column; justify-content: space-between;
+    opacity: 0; transition: opacity .8s ease;
   }
-  .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  #hud.on { opacity: 1; }
+  .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
 
   .chip {
-    padding: 6px 12px; border: 1px solid rgba(255,255,255,.18);
-    background: rgba(0,0,0,.42); backdrop-filter: blur(6px);
-    letter-spacing: .14em; text-transform: uppercase; font-size: 11px;
-    transition: color .2s, border-color .2s, box-shadow .2s;
+    padding: 7px 13px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(4,6,9,.5); backdrop-filter: blur(8px);
+    letter-spacing: .16em; text-transform: uppercase; font-size: 10.5px;
+    transition: color .25s, border-color .25s, box-shadow .25s;
   }
-  #level-name { max-width: 46ch; }
-  #phase[data-phase="light"]  { color:#f0a03c; border-color:#f0a03c; box-shadow: 0 0 20px rgba(240,160,60,.28) inset; }
-  #phase[data-phase="shadow"] { color:#4fd6ff; border-color:#4fd6ff; box-shadow: 0 0 20px rgba(79,214,255,.28) inset; }
+  #stage-title { font-size: 11px; }
+  #stage-title b { display: block; font-size: 17px; letter-spacing: .22em; font-weight: 600; margin-bottom: 2px; }
+  #phase[data-phase="light"]  { color:#ffb765; border-color:#ffb765; box-shadow: 0 0 26px rgba(255,160,60,.22) inset; }
+  #phase[data-phase="shadow"] { color:#63d8ff; border-color:#63d8ff; box-shadow: 0 0 26px rgba(79,214,255,.22) inset; }
 
-  #hint { align-self: center; text-align: center; opacity: .72; font-size: 12px; letter-spacing: .06em; min-height: 1.4em; }
+  #hint { align-self: center; text-align: center; opacity: .68; font-size: 11.5px; letter-spacing: .1em; min-height: 1.4em; max-width: 70ch; }
 
-  #flash {
-    position: fixed; inset: 0; z-index: 8; pointer-events: none;
-    background: #fff; opacity: 0; mix-blend-mode: overlay; transition: opacity .5s ease;
+  .stack { display: flex; gap: 10px; align-items: center; }
+  button.chip { pointer-events: auto; cursor: pointer; color: inherit; font: inherit; }
+  button.chip:hover { border-color: rgba(255,255,255,.5); }
+
+  /* ---- açılış perdesi ---- */
+  #boot {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 40%, #10151b 0%, #04060a 70%);
+    transition: opacity .9s ease, visibility .9s;
   }
-  #flash.on { opacity: .6; transition: opacity .04s; }
+  #boot.off { opacity: 0; visibility: hidden; }
+  .boot-inner { text-align: center; max-width: 620px; padding: 0 24px; }
+  .boot-inner h1 {
+    margin: 0 0 6px; font-size: clamp(44px, 11vw, 96px); font-weight: 700;
+    letter-spacing: .38em; text-indent: .38em;
+    background: linear-gradient(180deg, #ffffff 0%, #7d8894 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 60px rgba(150,190,255,.16);
+  }
+  .boot-inner p.sub { margin: 0 0 34px; font-size: 11px; letter-spacing: .3em; text-transform: uppercase; opacity: .5; }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 34px; }
+  .keys span { border: 1px solid rgba(255,255,255,.14); padding: 6px 11px; font-size: 10.5px; letter-spacing: .12em; opacity: .78; }
+  #start {
+    pointer-events: auto; cursor: pointer; font: inherit; color: #eaf1f8;
+    background: transparent; border: 1px solid rgba(255,255,255,.35);
+    padding: 15px 54px; letter-spacing: .38em; text-indent: .38em; font-size: 13px;
+    transition: background .3s, color .3s, letter-spacing .3s;
+  }
+  #start:hover { background: #eaf1f8; color: #05070a; letter-spacing: .48em; }
+  .note { margin-top: 26px; font-size: 10px; letter-spacing: .1em; opacity: .34; line-height: 1.8; }
 </style>
 
 <script type="importmap">
 {
   "imports": {
-    "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.mjs"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
   }
 }
 </script>
 </head>
 <body>
-  <div id="game"></div>
+  <div id="stage"></div>
   <div id="grain"></div>
   <div id="vignette"></div>
+  <div id="letterbox"></div>
+  <div id="flash"></div>
 
   <div id="hud">
     <div class="row">
-      <div class="chip" id="level-name">UMBRA</div>
+      <div class="chip" id="stage-title"><b>UMBRA</b><span id="stage-sub">gölge fazı</span></div>
       <div class="chip" id="phase" data-phase="light">Faz · Işık</div>
     </div>
-    <div class="row">
-      <div class="chip" id="keys">← → hareket · SPACE zıpla · SHIFT faz değiştir · R yeniden</div>
-      <div class="chip" id="deaths">0</div>
-    </div>
     <div id="hint"></div>
+    <div class="row">
+      <div class="stack">
+        <button class="chip" id="sound">Ses · Açık</button>
+        <button class="chip" id="restart">Yeniden (R)</button>
+      </div>
+      <div class="chip" id="deaths">0 ölüm</div>
+    </div>
   </div>
 
-  <div id="flash"></div>
+  <div id="boot">
+    <div class="boot-inner">
+      <h1>UMBRA</h1>
+      <p class="sub">gölge fazı platformer</p>
+      <div class="keys">
+        <span>A / D — yürü</span>
+        <span>SPACE — zıpla</span>
+        <span>SHIFT — faz değiştir</span>
+        <span>R — yeniden</span>
+      </div>
+      <button id="start">BAŞLA</button>
+      <p class="note">
+        Zemin her fazda katıdır. Platformlar fazla göre var olur ya da yok olur.<br />
+        Ses tarayıcı kısıtları nedeniyle oyun başlarken açılır.
+      </p>
+    </div>
+  </div>
 
   <script type="module" src="./src/main.js"></script>
 </body>
