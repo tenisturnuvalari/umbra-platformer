@@ -160,6 +160,7 @@ export class StageScene {
     moon.shadow.camera.far = 3200;
     const S = 1100;
     Object.assign(moon.shadow.camera, { left: -S, right: S, top: S, bottom: -S });
+    moon.shadow.camera.updateProjectionMatrix();
     moon.shadow.bias = -0.0012;
     moon.shadow.normalBias = 1.6;
     this.scene.add(moon, moon.target);
